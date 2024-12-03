@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const configFileName = ".tfvarenv/config.yaml"
+const configFileName = ".tfvarenv.yaml"
 
 type Config struct {
 	Environments []Environment `yaml:"environments"`
