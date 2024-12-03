@@ -46,3 +46,9 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+brews:
+  - repository:
+      owner: marcy326
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
