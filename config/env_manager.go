@@ -14,7 +14,6 @@ const configFileName = ".tfvarenv.yaml"
 
 type Config struct {
 	Environments []Environment `yaml:"environments"`
-	CurrentEnv   string        `yaml:"current_env"`
 }
 
 type Environment struct {
@@ -114,25 +113,6 @@ func ListEnvironments() ([]string, error) {
 		envs = append(envs, env.Name)
 	}
 	return envs, nil
-}
-
-func UseEnvironment(envName string) error {
-	configLock.Lock()
-	defer configLock.Unlock()
-
-	// Find environment
-	for _, env := range config.Environments {
-		if env.Name == envName {
-			config.CurrentEnv = envName
-			return saveConfig()
-		}
-	}
-
-	return errors.New("environment not found")
-}
-
-func GetCurrentEnvironment() string {
-	return config.CurrentEnv
 }
 
 func SaveConfigToFile(file *os.File, config *Config) error {

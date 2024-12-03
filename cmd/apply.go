@@ -14,13 +14,8 @@ func NewApplyCmd() *cobra.Command {
 		Use:   "apply",
 		Short: "Run terraform apply for the current environment",
 		Run: func(cmd *cobra.Command, args []string) {
-			currentEnv := config.GetCurrentEnvironment()
-			if currentEnv == "" {
-				fmt.Println("Error: No environment selected. Use `tfvarenv env use` to select an environment.")
-				os.Exit(1)
-			}
-
-			envInfo, err := config.GetEnvironmentInfo(currentEnv)
+			envName := args[0]
+			envInfo, err := config.GetEnvironmentInfo(envName)
 			if err != nil {
 				fmt.Println("Error:", err)
 				os.Exit(1)
@@ -36,12 +31,12 @@ func NewApplyCmd() *cobra.Command {
 			// Check if the account IDs match
 			if currentAccountID != envInfo.AccountID {
 				fmt.Printf("Error: Current AWS account (%s) does not match the account configured for environment '%s' (%s).\n",
-					currentAccountID, currentEnv, envInfo.AccountID)
+					currentAccountID, envName, envInfo.AccountID)
 				os.Exit(1)
 			}
 
 			// Confirmation prompt
-			fmt.Printf("You are about to apply changes to the '%s' environment (AWS account: %s).\n", currentEnv, envInfo.AccountID)
+			fmt.Printf("You are about to apply changes to the '%s' environment (AWS account: %s).\n", envName, envInfo.AccountID)
 			fmt.Print("Type 'yes' to confirm: ")
 			var input string
 			fmt.Scanln(&input)
@@ -51,7 +46,7 @@ func NewApplyCmd() *cobra.Command {
 			}
 
 			// Run terraform apply (placeholder)
-			fmt.Printf("Running terraform apply for environment '%s'...\n", currentEnv)
+			fmt.Printf("Running terraform apply for environment '%s'...\n", envName)
 		},
 	}
 

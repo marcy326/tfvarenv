@@ -15,7 +15,6 @@ func NewRootCmd() *cobra.Command {
     // Add individual commands
     rootCmd.AddCommand(NewAddCmd())
     rootCmd.AddCommand(NewListCmd())
-    rootCmd.AddCommand(NewUseCmd())
     rootCmd.AddCommand(NewInitCmd())
     rootCmd.AddCommand(NewVersionCmd())
 
