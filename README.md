@@ -4,12 +4,10 @@
 
 ## Installation
 
-To install `tfvarenv`, clone the repository and build the binary using Go:
+You can install `tfvarenv` using Homebrew:
 
-```
-git clone https://github.com/marcy326/tfvarenv.git
-cd tfvarenv
-go build -o tfvarenv
+```bash
+brew install marcy326/tap/tfvarenv
 ```
 
 ## Usage
@@ -20,7 +18,7 @@ Once installed, you can use the following commands:
 
 Initialize the configuration directory and file.
 
-```
+```bash
 tfvarenv init
 ```
 
@@ -28,7 +26,7 @@ tfvarenv init
 
 Add a new environment with specific details.
 
-```
+```bash
 tfvarenv add
 ```
 
@@ -38,7 +36,7 @@ You will be prompted to enter the environment name, S3 key, account ID, and loca
 
 List all available environments.
 
-```
+```bash
 tfvarenv list
 ```
 
@@ -46,7 +44,7 @@ tfvarenv list
 
 Switch to a specific environment.
 
-```
+```bash
 tfvarenv use [environment_name]
 ```
 
@@ -54,7 +52,7 @@ tfvarenv use [environment_name]
 
 Run `terraform apply` for the current environment.
 
-```
+```bash
 tfvarenv apply
 ```
 
@@ -62,7 +60,7 @@ tfvarenv apply
 
 Run `terraform plan` for the current environment.
 
-```
+```bash
 tfvarenv plan
 ```
 

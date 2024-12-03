@@ -21,7 +21,7 @@ type Environment struct {
 	Name      string `yaml:"name"`
 	S3Key     string `yaml:"s3_key"`
 	AccountID string `yaml:"account_id"`
-	LocalFile string `yaml:"local_file"` // ローカルファイルパスを追加
+	LocalFile string `yaml:"local_file"`
 }
 
 var (
