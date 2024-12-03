@@ -20,17 +20,11 @@ func NewInitCmd() *cobra.Command {
                 os.Exit(1)
             }
 
-            configDir := filepath.Join(cwd, ".tfvarenv")
-            configPath := filepath.Join(configDir, "config.yaml")
+            configPath := filepath.Join(cwd, ".tfvarenv.yaml")
 
             if _, err := os.Stat(configPath); err == nil {
                 fmt.Println("Configuration already initialized.")
                 return
-            }
-
-            if err := os.MkdirAll(configDir, os.ModePerm); err != nil {
-                fmt.Println("Error creating configuration directory:", err)
-                os.Exit(1)
             }
 
             file, err := os.Create(configPath)
