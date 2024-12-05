@@ -4,3 +4,4 @@ dev/
 /tfvarenv
 /.tfvarenv.yaml
 .tmp/
+*.tfvars

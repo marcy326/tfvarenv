@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +44,36 @@ func NewInitCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			gitignorePath := filepath.Join(cwd, ".gitignore")
+			addTfvarsToGitignore(gitignorePath)
+
 			fmt.Println("Configuration initialized successfully.")
 		},
+	}
+}
+
+func addTfvarsToGitignore(gitignorePath string) {
+	file, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		fmt.Println("Error opening or creating .gitignore file:", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	found := false
+	for scanner.Scan() {
+		if scanner.Text() == "*.tfvars" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		if _, err := file.WriteString("\n*.tfvars\n"); err != nil {
+			fmt.Println("Error writing to .gitignore file:", err)
+		} else {
+			fmt.Println("Added '*.tfvars' to .gitignore.")
+		}
 	}
 }
