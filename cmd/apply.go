@@ -51,7 +51,11 @@ func NewApplyCmd() *cobra.Command {
 
 			// Run terraform apply
 			fmt.Printf("Running terraform apply for environment '%s' (remote: %v)...\n", envName, remote)
-			err = utils.RunCommand("terraform", "apply", "-var-file", varFile, options)
+			args = []string{"apply", "-var-file=" + varFile}
+			if options != "" {
+				args = append(args, options)
+			}
+			err = utils.RunCommand("terraform", args...)
 			if err != nil {
 				fmt.Println("Error running terraform apply:", err)
 				os.Exit(1)

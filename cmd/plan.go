@@ -51,7 +51,11 @@ func NewPlanCmd() *cobra.Command {
 
 			// Run terraform plan
 			fmt.Printf("Running terraform plan for environment '%s' (remote: %v)...\n", envName, remote)
-			err = utils.RunCommand("terraform", "plan", "-var-file", varFile, options)
+			args = []string{"plan", "-var-file=" + varFile}
+			if options != "" {
+				args = append(args, options)
+			}
+			err = utils.RunCommand("terraform", args...)
 			if err != nil {
 				fmt.Println("Error running terraform plan:", err)
 				os.Exit(1)
