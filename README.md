@@ -30,7 +30,7 @@ Add a new environment with specific details.
 tfvarenv add
 ```
 
-You will be prompted to enter the environment name, S3 key, account ID, and local file path.
+You will be prompted to enter the environment name, S3 key, local file path, account ID and region.
 
 ### List Environments
 
@@ -40,12 +40,12 @@ List all available environments.
 tfvarenv list
 ```
 
-### Use Environment
+### Plan Environment
 
-Switch to a specific environment.
+Run `terraform plan` for the current environment.
 
 ```bash
-tfvarenv use [environment_name]
+tfvarenv plan [environment]
 ```
 
 ### Apply Environment
@@ -53,15 +53,24 @@ tfvarenv use [environment_name]
 Run `terraform apply` for the current environment.
 
 ```bash
-tfvarenv apply
+tfvarenv apply [environment]
 ```
 
-### Plan Environment
 
-Run `terraform plan` for the current environment.
+### Upload Environment
+
+Upload the local tfvars file to S3 for a specific environment.
 
 ```bash
-tfvarenv plan
+tfvarenv upload [environment]
+```
+
+### Download Environment
+
+Download the tfvars file from S3 to the local path for a specific environment.
+
+```bash
+tfvarenv download [environment]
 ```
 
 ## Configuration
