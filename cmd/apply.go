@@ -22,7 +22,7 @@ func NewApplyCmd() *cobra.Command {
 			}
 
 			// Get the current AWS account ID
-			currentAccountID, err := utils.GetAWSAccountID()
+			currentAccountID, err := utils.GetAWSAccountID(envInfo.Region)
 			if err != nil {
 				fmt.Println("Error retrieving AWS account ID:", err)
 				os.Exit(1)
