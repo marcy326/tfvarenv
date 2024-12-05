@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -42,10 +43,10 @@ func GetAWSAccountID(region string) (string, error) {
 	return *output.Account, nil
 }
 
-func DownloadFromS3(s3Key, localFile, region string) error {
+func DownloadFromS3(s3Key, localFile, region string) (string, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if err != nil {
-		return fmt.Errorf("unable to load SDK config, %v", err)
+		return "", fmt.Errorf("unable to load SDK config, %v", err)
 	}
 
 	client := s3.NewFromConfig(cfg)
@@ -53,7 +54,7 @@ func DownloadFromS3(s3Key, localFile, region string) error {
 	// Parse the S3 key to get bucket and key
 	bucket, key, err := parseS3Key(s3Key)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Get the object from S3
@@ -62,24 +63,34 @@ func DownloadFromS3(s3Key, localFile, region string) error {
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return fmt.Errorf("unable to download item %q, %v", s3Key, err)
+		return "", fmt.Errorf("unable to download item %q, %v", s3Key, err)
 	}
 	defer resp.Body.Close()
 
+	// Ensure the directory exists
+	dir := filepath.Dir(localFile)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return "", fmt.Errorf("failed to create directory %q, %v", dir, err)
+	}
+
+	// Determine the local file path
+	fileName := filepath.Base(key)
+	localFilePath := filepath.Join(dir, fileName)
+
 	// Create the local file
-	outFile, err := os.Create(localFile)
+	outFile, err := os.Create(localFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to create file %q, %v", localFile, err)
+		return "", fmt.Errorf("failed to create file %q, %v", localFilePath, err)
 	}
 	defer outFile.Close()
 
 	// Write the contents to the file
 	_, err = outFile.ReadFrom(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to write to file %q, %v", localFile, err)
+		return "", fmt.Errorf("failed to write to file %q, %v", localFilePath, err)
 	}
 
-	return nil
+	return localFilePath, nil
 }
 
 func UploadToS3(localFile, s3Key, region string) error {

@@ -40,23 +40,6 @@ List all available environments.
 tfvarenv list
 ```
 
-### Plan Environment
-
-Run `terraform plan` for the current environment.
-
-```bash
-tfvarenv plan [environment]
-```
-
-### Apply Environment
-
-Run `terraform apply` for the current environment.
-
-```bash
-tfvarenv apply [environment]
-```
-
-
 ### Upload Environment
 
 Upload the local tfvars file to S3 for a specific environment.
@@ -72,6 +55,26 @@ Download the tfvars file from S3 to the local path for a specific environment.
 ```bash
 tfvarenv download [environment]
 ```
+
+### Plan Environment
+
+Run `terraform plan` for the current environment.
+
+```bash
+tfvarenv plan [environment] [--remote]
+```
+
+- When the `--remote` flag is used, the tfvars file is downloaded from S3 to the local `.tmp/` directory and used for the `plan` operation.
+
+### Apply Environment
+
+Run `terraform apply` for the current environment.
+
+```bash
+tfvarenv apply [environment] [--remote]
+```
+
+- When the `--remote` flag is used, the tfvars file is downloaded from S3 to the local `.tmp/` directory and used for the `apply` operation.
 
 ## Configuration
 

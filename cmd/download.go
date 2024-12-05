@@ -21,7 +21,7 @@ func NewDownloadCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			err = utils.DownloadFromS3(envInfo.S3Key, envInfo.LocalFile, envInfo.Region)
+			_, err = utils.DownloadFromS3(envInfo.S3Key, envInfo.LocalFile, envInfo.Region)
 			if err != nil {
 				fmt.Println("Error downloading file:", err)
 				os.Exit(1)

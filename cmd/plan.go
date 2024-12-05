@@ -15,6 +15,7 @@ func NewPlanCmd() *cobra.Command {
 		Short: "Run terraform plan for the current environment",
 		Run: func(cmd *cobra.Command, args []string) {
 			envName := args[0]
+			remote, _ := cmd.Flags().GetBool("remote")
 			envInfo, err := config.GetEnvironmentInfo(envName)
 			if err != nil {
 				fmt.Println("Error:", err)
@@ -35,15 +36,29 @@ func NewPlanCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			var varFile string
+			if remote {
+				// Download tfvars file from S3
+				varFile, err = utils.DownloadFromS3(envInfo.S3Key, ".tmp/", envInfo.Region)
+				if err != nil {
+					fmt.Println("Error downloading tfvars file from S3:", err)
+					os.Exit(1)
+				}
+			} else {
+				varFile = envInfo.LocalFile
+			}
+
 			// Run terraform plan
-			fmt.Printf("Running terraform plan for environment '%s'...\n", envName)
-			err = utils.RunCommand("terraform", "plan", "-var-file", envInfo.LocalFile)
+			fmt.Printf("Running terraform plan for environment '%s' (remote: %v)...\n", envName, remote)
+			err = utils.RunCommand("terraform", "plan", "-var-file", varFile)
 			if err != nil {
 				fmt.Println("Error running terraform plan:", err)
 				os.Exit(1)
 			}
 		},
 	}
+
+	planCmd.Flags().Bool("remote", false, "Run the plan in a remote environment")
 
 	return planCmd
 }
