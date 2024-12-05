@@ -16,6 +16,7 @@ func NewPlanCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			envName := args[0]
 			remote, _ := cmd.Flags().GetBool("remote")
+			options, _ := cmd.Flags().GetString("options")
 			envInfo, err := config.GetEnvironmentInfo(envName)
 			if err != nil {
 				fmt.Println("Error:", err)
@@ -50,7 +51,7 @@ func NewPlanCmd() *cobra.Command {
 
 			// Run terraform plan
 			fmt.Printf("Running terraform plan for environment '%s' (remote: %v)...\n", envName, remote)
-			err = utils.RunCommand("terraform", "plan", "-var-file", varFile)
+			err = utils.RunCommand("terraform", "plan", "-var-file", varFile, options)
 			if err != nil {
 				fmt.Println("Error running terraform plan:", err)
 				os.Exit(1)
@@ -59,6 +60,7 @@ func NewPlanCmd() *cobra.Command {
 	}
 
 	planCmd.Flags().Bool("remote", false, "Run the plan in a remote environment")
+	planCmd.Flags().String("options", "", "Additional options for terraform plan")
 
 	return planCmd
 }

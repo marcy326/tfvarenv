@@ -16,6 +16,7 @@ func NewApplyCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			envName := args[0]
 			remote, _ := cmd.Flags().GetBool("remote")
+			options, _ := cmd.Flags().GetString("options")
 			envInfo, err := config.GetEnvironmentInfo(envName)
 			if err != nil {
 				fmt.Println("Error:", err)
@@ -50,7 +51,7 @@ func NewApplyCmd() *cobra.Command {
 
 			// Run terraform apply
 			fmt.Printf("Running terraform apply for environment '%s' (remote: %v)...\n", envName, remote)
-			err = utils.RunCommand("terraform", "apply", "-var-file", varFile)
+			err = utils.RunCommand("terraform", "apply", "-var-file", varFile, options)
 			if err != nil {
 				fmt.Println("Error running terraform apply:", err)
 				os.Exit(1)
@@ -59,6 +60,7 @@ func NewApplyCmd() *cobra.Command {
 	}
 
 	applyCmd.Flags().Bool("remote", false, "Run the apply in a remote environment")
+	applyCmd.Flags().String("options", "", "Additional options for terraform apply")
 
 	return applyCmd
 }
