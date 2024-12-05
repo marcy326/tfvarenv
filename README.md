@@ -61,20 +61,22 @@ tfvarenv download [environment]
 Run `terraform plan` for the current environment.
 
 ```bash
-tfvarenv plan [environment] [--remote]
+tfvarenv plan [environment] [--remote] [--options="<options>"]
 ```
 
 - When the `--remote` flag is used, the tfvars file is downloaded from S3 to the local `.tmp/` directory and used for the `plan` operation.
+- The `--options` flag allows you to pass additional options to the `terraform plan` command.
 
 ### Apply Environment
 
 Run `terraform apply` for the current environment.
 
 ```bash
-tfvarenv apply [environment] [--remote]
+tfvarenv apply [environment] [--remote] [--options="<options>"]
 ```
 
 - When the `--remote` flag is used, the tfvars file is downloaded from S3 to the local `.tmp/` directory and used for the `apply` operation.
+- The `--options` flag allows you to pass additional options to the `terraform apply` command, such as `-auto-approve`.
 
 ## Configuration
 
