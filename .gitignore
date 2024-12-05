@@ -1,2 +1,5 @@
 .tfvarenv
 dist/
+dev/
+/tfvarenv
+/.tfvarenv.yaml

@@ -35,18 +35,13 @@ func NewApplyCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			// Confirmation prompt
-			fmt.Printf("You are about to apply changes to the '%s' environment (AWS account: %s).\n", envName, envInfo.AccountID)
-			fmt.Print("Type 'yes' to confirm: ")
-			var input string
-			fmt.Scanln(&input)
-			if input != "yes" {
-				fmt.Println("Operation cancelled.")
-				return
-			}
-
 			// Run terraform apply (placeholder)
 			fmt.Printf("Running terraform apply for environment '%s'...\n", envName)
+			err = utils.RunCommand("terraform", "apply", "-var-file", envInfo.LocalFile)
+			if err != nil {
+				fmt.Println("Error running terraform apply:", err)
+				os.Exit(1)
+			}
 		},
 	}
 
