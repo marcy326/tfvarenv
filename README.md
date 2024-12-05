@@ -80,7 +80,7 @@ tfvarenv apply [environment] [--remote] [--options="<options>"]
 
 ## Configuration
 
-The configuration is stored in a YAML file located at `.tfvarenv/config.yaml`. It contains details about the environments and the current environment in use.
+The configuration is stored in a YAML file located at `.tfvarenv.yaml`. It contains details about the environments and the current environment in use.
 
 ## Dependencies
 
