@@ -11,6 +11,6 @@ runs:
         echo "Installing tfvarenv version ${{ inputs.version }}"
         cd /tmp
         curl -sL https://github.com/marcy326/tfvarenv/releases/download/${{ inputs.version }}/tfvarenv_${{ inputs.version }}_linux_amd64.tar.gz | tar zxvf -
-        sudo install tfvarenv_${{ inputs.version }}_linux_amd64/tfvarenv /usr/local/bin
-        rm -rf tfvarenv_${{ inputs.version }}_linux_amd64/
+        sudo install tfvarenv /usr/local/bin
+        rm -f tfvarenv
       shell: bash

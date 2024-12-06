@@ -1,0 +1,26 @@
+name: Test tfvarenv Action
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Install tfvarenv
+        uses: marcy326/tfvarenv@v0
+        with:
+          version: 'v0.1.2'
+
+      - name: Verify tfvarenv installation
+        run: |
+          tfvarenv version
