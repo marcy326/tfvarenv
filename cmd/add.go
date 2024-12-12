@@ -89,7 +89,7 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 	}
 
 	// AWS Configuration
-	fmt.Printf("\nRegion [%s]: ", defaultRegion)
+	fmt.Printf("Region [%s]: ", defaultRegion)
 	region, _ := reader.ReadString('\n')
 	region = strings.TrimSpace(region)
 	if region == "" {
@@ -134,7 +134,7 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 		fmt.Printf("Error setting up local environment: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("done")
+	fmt.Println(": done")
 
 	// Add environment to configuration
 	fmt.Print("\nAdding environment to .tfvarenv.json")
@@ -241,9 +241,11 @@ func checkFilesStatus(env *config.Environment) error {
 
 	// リモートファイルの存在確認
 	remoteExists := false
-	versionInfo, err := utils.GetLatestS3Version(env.S3.Bucket, env.GetS3Path(), env.AWS.Region)
+	var versionInfo *utils.VersionInfo
+	vInfo, err := utils.GetLatestS3Version(env.S3.Bucket, env.GetS3Path(), env.AWS.Region)
 	if err == nil {
 		remoteExists = true
+		versionInfo = vInfo
 	}
 
 	fmt.Println("\nFile Status Check:")
@@ -269,9 +271,15 @@ func checkFilesStatus(env *config.Environment) error {
 
 	case !localExists && remoteExists:
 		// リモートのみ存在: ダウンロードを提案
-		fmt.Printf("Found remote tfvars file (Version: %s)\n", versionInfo.VersionID)
-		if promptYesNo("Would you like to download it now?", true) {
-			if err := downloadTFVars(env.Name, ""); err != nil {
+		fmt.Printf("\nFound remote tfvars file:\n")
+		fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
+		fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
+		if versionInfo.Description != "" {
+			fmt.Printf("  Description: %s\n", versionInfo.Description)
+		}
+
+		if promptYesNo("\nWould you like to download it now?", true) {
+			if err := utils.DownloadTFVars(env.Name, ""); err != nil {
 				return fmt.Errorf("failed to download tfvars: %w", err)
 			}
 			fmt.Println("Successfully downloaded tfvars file.")
@@ -282,8 +290,11 @@ func checkFilesStatus(env *config.Environment) error {
 	case localExists && !remoteExists:
 		// ローカルのみ存在: アップロードを提案
 		fmt.Println("Found local tfvars file but no remote file.")
+
 		if promptYesNo("Would you like to upload it now?", true) {
-			if err := uploadTFVars(env.Name, "first upload"); err != nil {
+			description := "Initial upload during environment setup"
+			// ファイルをアップロード（S3のバージョンIDが生成される）
+			if err := utils.UploadTFVars(env.Name, description); err != nil {
 				return fmt.Errorf("failed to upload tfvars: %w", err)
 			}
 			fmt.Println("Successfully uploaded tfvars file.")
@@ -300,11 +311,39 @@ func checkFilesStatus(env *config.Environment) error {
 
 		if localHash == versionInfo.Hash {
 			fmt.Println("Local and remote files are in sync.")
+			fmt.Printf("\nCurrent version information:\n")
+			fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
+			fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
+			if versionInfo.Description != "" {
+				fmt.Printf("  Description: %s\n", versionInfo.Description)
+			}
 		} else {
 			fmt.Println("Warning: Local and remote files are different!")
-			fmt.Printf("Remote version: %s (Last modified: %s)\n",
-				versionInfo.VersionID, versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
-			fmt.Println("Action needed: Use 'tfvarenv download' or 'tfvarenv upload' to sync files.")
+			fmt.Printf("\nRemote version information:\n")
+			fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
+			fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
+			if versionInfo.Description != "" {
+				fmt.Printf("  Description: %s\n", versionInfo.Description)
+			}
+
+			fmt.Println("\nAction needed: Use one of the following commands to sync files:")
+			fmt.Printf("  Download remote version: tfvarenv download %s\n", env.Name)
+			fmt.Printf("  Upload local changes:    tfvarenv upload %s\n", env.Name)
+		}
+	}
+
+	// Get deployment status if remote exists
+	if remoteExists {
+		deployments, err := utils.ListDeployments(env.S3.Bucket, env.GetDeploymentHistoryKey(), env.AWS.Region)
+		if err == nil && len(deployments) > 0 {
+			// Find the latest deployment for the current version
+			for _, d := range deployments {
+				if d.VersionID == versionInfo.VersionID {
+					fmt.Printf("\nDeployment Status: Last deployed on %s by %s\n",
+						d.DeployedAt.Format("2006-01-02 15:04:05"), d.DeployedBy)
+					break
+				}
+			}
 		}
 	}
 

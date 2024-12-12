@@ -134,3 +134,113 @@ func createBackup(envName, sourceFile string) error {
 	fmt.Printf("Created backup: %s\n", backupFile)
 	return nil
 }
+
+func UploadTFVars(envName, description string) error {
+	env, err := config.GetEnvironmentInfo(envName)
+	if err != nil {
+		return fmt.Errorf("environment not found: %w", err)
+	}
+
+	// Check if local file exists
+	if _, err := os.Stat(env.Local.TFVarsPath); err != nil {
+		return fmt.Errorf("local file not found: %w", err)
+	}
+
+	// Calculate file hash and size
+	hash, err := CalculateFileHash(env.Local.TFVarsPath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate file hash: %w", err)
+	}
+
+	fileInfo, err := os.Stat(env.Local.TFVarsPath)
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	// Upload to S3 and get version information
+	versionInfo, err := UploadToS3WithVersioning(
+		env.Local.TFVarsPath,
+		env.GetS3Path(),
+		env.AWS.Region,
+		description,
+	)
+	if err != nil {
+		return fmt.Errorf("upload failed: %w", err)
+	}
+
+	// Create version record
+	version := &Version{
+		VersionID:   versionInfo.VersionID,
+		Timestamp:   time.Now(),
+		Hash:        hash,
+		Description: description,
+		UploadedBy:  os.Getenv("USER"),
+		Size:        fileInfo.Size(),
+	}
+
+	// Add version to version management
+	if err := AddVersion(env, version); err != nil {
+		return fmt.Errorf("failed to record version: %w", err)
+	}
+
+	fmt.Printf("Successfully uploaded %s to %s\n", env.Local.TFVarsPath, env.GetS3Path())
+	fmt.Printf("Version ID: %s\n", versionInfo.VersionID)
+	if description != "" {
+		fmt.Printf("Description: %s\n", description)
+	}
+
+	return nil
+}
+
+func DownloadTFVars(envName, versionID string) error {
+	env, err := config.GetEnvironmentInfo(envName)
+	if err != nil {
+		return fmt.Errorf("environment not found: %w", err)
+	}
+
+	// Ensure local directory exists
+	if err := os.MkdirAll(filepath.Dir(env.Local.TFVarsPath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Download file
+	var downloadPath string
+	if versionID != "" {
+		downloadPath, err = DownloadFromS3WithVersion(
+			env.GetS3Path(),
+			env.Local.TFVarsPath,
+			env.AWS.Region,
+			versionID,
+		)
+	} else {
+		downloadPath, err = DownloadFromS3(
+			env.GetS3Path(),
+			env.Local.TFVarsPath,
+			env.AWS.Region,
+		)
+	}
+
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	fmt.Printf("Successfully downloaded %s to %s\n", env.GetS3Path(), downloadPath)
+	return nil
+}
+
+func CopyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}

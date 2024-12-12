@@ -373,3 +373,34 @@ func RecordDeployment(bucket, key string, region string, info DeploymentInfo) er
 
 	return nil
 }
+
+func ListDeployments(bucket, key, region string) ([]DeploymentInfo, error) {
+	cfg, err := getAWSConfig(region)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load AWS config: %w", err)
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+
+	// Get deployment history file
+	result, err := s3Client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var notFound *types.NoSuchKey
+		if errors.As(err, &notFound) {
+			return []DeploymentInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to get deployment history: %w", err)
+	}
+	defer result.Body.Close()
+
+	// Decode deployment history
+	var deployments []DeploymentInfo
+	if err := json.NewDecoder(result.Body).Decode(&deployments); err != nil {
+		return nil, fmt.Errorf("failed to decode deployment history: %w", err)
+	}
+
+	return deployments, nil
+}
