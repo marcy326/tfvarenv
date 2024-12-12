@@ -46,11 +46,7 @@ func initializeProject() error {
 	initialConfig := config.Config{
 		Version:       "1.0",
 		DefaultRegion: region,
-		S3: config.S3Config{
-			Versioning:     true,
-			MetadataSuffix: "versions.json",
-		},
-		Environments: make(map[string]config.Environment),
+		Environments:  make(map[string]config.Environment),
 	}
 
 	// Create config file

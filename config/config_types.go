@@ -5,9 +5,8 @@ import (
 )
 
 const (
-	configFileName     = ".tfvarenv.json"
-	defaultVersion     = "1.0"
-	defaultMetadataExt = "versions.json"
+	configFileName = ".tfvarenv.json"
+	defaultVersion = "1.0"
 )
 
 // Config represents the root configuration structure

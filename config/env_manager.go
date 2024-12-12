@@ -27,11 +27,7 @@ func init() {
 	config = Config{
 		Version:       defaultVersion,
 		DefaultRegion: "ap-northeast-1",
-		S3: S3Config{
-			Versioning:     true,
-			MetadataSuffix: defaultMetadataExt,
-		},
-		Environments: make(map[string]Environment),
+		Environments:  make(map[string]Environment),
 	}
 
 	// Try to load existing config
@@ -58,7 +54,7 @@ func loadConfig() error {
 	tmpConfig.Environments = make(map[string]Environment)
 
 	if err := json.Unmarshal(data, &tmpConfig); err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal config: %w\n", err)
 	}
 
 	config = tmpConfig
@@ -98,11 +94,7 @@ func InitConfig() error {
 	config = Config{
 		Version:       defaultVersion,
 		DefaultRegion: "ap-northeast-1",
-		S3: S3Config{
-			Versioning:     true,
-			MetadataSuffix: defaultMetadataExt,
-		},
-		Environments: make(map[string]Environment),
+		Environments:  make(map[string]Environment),
 	}
 
 	return saveConfig()

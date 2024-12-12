@@ -21,6 +21,8 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(NewApplyCmd())
 	rootCmd.AddCommand(NewDownloadCmd())
 	rootCmd.AddCommand(NewUploadCmd())
+	rootCmd.AddCommand(NewVersionsCmd())
+	rootCmd.AddCommand(NewHistoryCmd())
 
 	return rootCmd
 }
