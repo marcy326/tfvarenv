@@ -2,6 +2,6 @@
 dist/
 dev/
 /tfvarenv
-/.tfvarenv.yaml
+/.tfvarenv.json
 .tmp/
 *.tfvars

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"tfvarenv/config"
 
 	"github.com/spf13/cobra"
@@ -15,65 +15,70 @@ func NewInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize the tfvarenv configuration",
 		Run: func(cmd *cobra.Command, args []string) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				fmt.Println("Error determining current directory:", err)
+			if err := initializeProject(); err != nil {
+				fmt.Printf("Error initializing project: %v\n", err)
 				os.Exit(1)
 			}
-
-			configPath := filepath.Join(cwd, ".tfvarenv.yaml")
-
-			if _, err := os.Stat(configPath); err == nil {
-				fmt.Println("Configuration already initialized.")
-				return
-			}
-
-			file, err := os.Create(configPath)
-			if err != nil {
-				fmt.Println("Error creating configuration file:", err)
-				os.Exit(1)
-			}
-			defer file.Close()
-
-			defaultConfig := config.Config{
-				Environments: []config.Environment{},
-			}
-
-			if err := config.SaveConfigToFile(file, &defaultConfig); err != nil {
-				fmt.Println("Error writing default configuration:", err)
-				os.Exit(1)
-			}
-
-			gitignorePath := filepath.Join(cwd, ".gitignore")
-			addTfvarsToGitignore(gitignorePath)
-
-			fmt.Println("Configuration initialized successfully.")
 		},
 	}
 }
 
-func addTfvarsToGitignore(gitignorePath string) {
-	file, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+func initializeProject() error {
+	// Check if config already exists
+	if _, err := os.Stat(".tfvarenv.json"); err == nil {
+		return fmt.Errorf("configuration file already exists")
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Get default region from user
+	fmt.Print("Enter default AWS region [us-east-1]: ")
+	region, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("Error opening or creating .gitignore file:", err)
-		return
+		return fmt.Errorf("failed to read input: %w", err)
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	found := false
-	for scanner.Scan() {
-		if scanner.Text() == "*.tfvars" {
-			found = true
-			break
-		}
+	region = strings.TrimSpace(region)
+	if region == "" {
+		region = "us-east-1"
 	}
 
-	if !found {
-		if _, err := file.WriteString("\n*.tfvars\n"); err != nil {
-			fmt.Println("Error writing to .gitignore file:", err)
-		} else {
-			fmt.Println("Added '*.tfvars' to .gitignore.")
-		}
+	// Create initial configuration
+	initialConfig := config.Config{
+		Version:       "1.0",
+		DefaultRegion: region,
+		S3: config.S3Config{
+			Versioning:     true,
+			MetadataSuffix: "versions.json",
+		},
+		Environments: make(map[string]config.Environment),
 	}
+
+	// Create config file
+	configFile, err := os.Create(".tfvarenv.json")
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer configFile.Close()
+
+	if err := config.SaveConfigToFile(configFile, &initialConfig); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	// Create environments directory
+	if err := os.MkdirAll("environments", 0755); err != nil {
+		return fmt.Errorf("failed to create environments directory: %w", err)
+	}
+
+	// Update .gitignore
+	if err := updateGitignore(); err != nil {
+		return fmt.Errorf("failed to update .gitignore: %w", err)
+	}
+
+	fmt.Println("\nInitialization completed successfully:")
+	fmt.Printf("- Created .tfvarenv.yaml with default region: %s\n", region)
+	fmt.Println("- Created environments directory")
+	fmt.Println("- Updated .gitignore")
+	fmt.Println("\nUse 'tfvarenv add' to add a new environment.")
+
+	return nil
 }
