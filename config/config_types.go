@@ -13,14 +13,7 @@ const (
 type Config struct {
 	Version       string                 `json:"version"`
 	DefaultRegion string                 `json:"default_region"`
-	S3            S3Config               `json:"s3"`
 	Environments  map[string]Environment `json:"environments"`
-}
-
-// S3Config represents global S3 settings
-type S3Config struct {
-	Versioning     bool   `json:"versioning"`
-	MetadataSuffix string `json:"metadata_suffix"`
 }
 
 // Environment represents a single environment configuration
