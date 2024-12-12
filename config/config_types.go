@@ -13,7 +13,6 @@ const (
 type Config struct {
 	Version       string                 `json:"version"`
 	DefaultRegion string                 `json:"default_region"`
-	Versioning    bool                   `json:"versioning"`
 	Environments  map[string]Environment `json:"environments"`
 }
 
