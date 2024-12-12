@@ -10,61 +10,34 @@ import (
 )
 
 func NewPlanCmd() *cobra.Command {
+	var (
+		remote    bool
+		options   string
+		versionID string
+	)
+
 	planCmd := &cobra.Command{
-		Use:   "plan",
-		Short: "Run terraform plan for the current environment",
+		Use:   "plan [environment]",
+		Short: "Run terraform plan for the specified environment",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			envName := args[0]
-			remote, _ := cmd.Flags().GetBool("remote")
-			options, _ := cmd.Flags().GetString("options")
-			envInfo, err := config.GetEnvironmentInfo(envName)
+			env, err := config.GetEnvironmentInfo(envName)
 			if err != nil {
-				fmt.Println("Error:", err)
+				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 
-			// Get the current AWS account ID
-			currentAccountID, err := utils.GetAWSAccountID(envInfo.Region)
-			if err != nil {
-				fmt.Println("Error retrieving AWS account ID:", err)
-				os.Exit(1)
-			}
-
-			// Check if the account IDs match
-			if currentAccountID != envInfo.AccountID {
-				fmt.Printf("Error: Current AWS account (%s) does not match the account configured for environment '%s' (%s).\n",
-					currentAccountID, envName, envInfo.AccountID)
-				os.Exit(1)
-			}
-
-			var varFile string
-			if remote {
-				// Download tfvars file from S3
-				varFile, err = utils.DownloadFromS3(envInfo.S3Key, ".tmp/", envInfo.Region)
-				if err != nil {
-					fmt.Println("Error downloading tfvars file from S3:", err)
-					os.Exit(1)
-				}
-			} else {
-				varFile = envInfo.LocalFile
-			}
-
-			// Run terraform plan
-			fmt.Printf("Running terraform plan for environment '%s' (remote: %v)...\n", envName, remote)
-			args = []string{"plan", "-var-file=" + varFile}
-			if options != "" {
-				args = append(args, options)
-			}
-			err = utils.RunCommand("terraform", args...)
-			if err != nil {
-				fmt.Println("Error running terraform plan:", err)
+			if err := utils.RunTerraformCommand("plan", env, remote, versionID, options); err != nil {
+				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	planCmd.Flags().Bool("remote", false, "Run the plan in a remote environment")
-	planCmd.Flags().String("options", "", "Additional options for terraform plan")
+	planCmd.Flags().BoolVar(&remote, "remote", false, "Use remote tfvars file from S3")
+	planCmd.Flags().StringVar(&options, "options", "", "Additional options for terraform plan")
+	planCmd.Flags().StringVar(&versionID, "version-id", "", "Specific version ID to use (only with --remote)")
 
 	return planCmd
 }
