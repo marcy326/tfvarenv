@@ -60,11 +60,6 @@ func initializeProject() error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	// Create environments directory
-	if err := os.MkdirAll("environments", 0755); err != nil {
-		return fmt.Errorf("failed to create environments directory: %w", err)
-	}
-
 	// Update .gitignore
 	if err := updateGitignore(); err != nil {
 		return fmt.Errorf("failed to update .gitignore: %w", err)
