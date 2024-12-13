@@ -13,10 +13,8 @@ import (
 	"tfvarenv/config"
 	"tfvarenv/utils/aws"
 	"tfvarenv/utils/command"
-	"tfvarenv/utils/deployment"
 	"tfvarenv/utils/file"
 	"tfvarenv/utils/terraform"
-	"tfvarenv/utils/version"
 )
 
 func NewAddCmd() *cobra.Command {
@@ -191,8 +189,18 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 			fmt.Printf("Warning: Failed to check file status: %v\n", err)
 		}
 	}
-
 	fmt.Printf("\nEnvironment '%s' added successfully.\n", envName)
+
+	fmt.Printf("\nFile locations:\n")
+	fmt.Printf("  Local: %s\n", env.Local.TFVarsPath)
+	fmt.Printf("  Remote: %s\n", env.GetFullS3Path())
+
+	fmt.Println("\nUse the following commands to manage tfvars:")
+	fmt.Printf("- Download: tfvarenv download %s\n", envName)
+	fmt.Printf("- Upload:   tfvarenv upload %s\n", envName)
+	fmt.Printf("- Plan:     tfvarenv plan %s\n", envName)
+	fmt.Printf("- Apply:    tfvarenv apply %s\n", envName)
+
 	return nil
 }
 
@@ -237,9 +245,12 @@ func checkFilesStatus(ctx context.Context, utils command.Utils, env *config.Envi
 	}
 
 	// Check remote file existence
-	versionManager := version.NewManager(utils.GetAWSClient(), fileUtils, env)
-	latestVersion, err := versionManager.GetLatestVersion(ctx)
-	remoteExists := err == nil && latestVersion != nil
+	downloadInput := &aws.DownloadInput{
+		Bucket: env.S3.Bucket,
+		Key:    env.GetS3Path(),
+	}
+	_, err = utils.GetAWSClient().DownloadFile(ctx, downloadInput)
+	remoteExists := err == nil
 
 	fmt.Println("\nFile Status Check:")
 
@@ -247,11 +258,11 @@ func checkFilesStatus(ctx context.Context, utils command.Utils, env *config.Envi
 	case !localExists && !remoteExists:
 		return handleNoFiles(fileUtils, env)
 	case !localExists && remoteExists:
-		return handleRemoteOnly(ctx, utils, env, latestVersion)
+		return handleRemoteOnly(ctx, utils, env)
 	case localExists && !remoteExists:
 		return handleLocalOnly(ctx, utils, env)
 	default:
-		return handleBothExist(ctx, utils, env, latestVersion)
+		return handleBothExist(ctx, utils, env)
 	}
 }
 
@@ -274,22 +285,16 @@ func handleNoFiles(fileUtils file.Utils, env *config.Environment) error {
 }
 
 // リモートのみ存在する場合の処理
-func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Environment, ver *version.Version) error {
-	fmt.Printf("\nFound remote tfvars file:\n")
-	fmt.Printf("  Version ID: %s\n", ver.VersionID[:8])
-	fmt.Printf("  Uploaded: %s\n", ver.Timestamp.Format("2006-01-02 15:04:05"))
-	if ver.Description != "" {
-		fmt.Printf("  Description: %s\n", ver.Description)
-	}
+func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Environment) error {
+	fmt.Println("Found remote tfvars file but no local file")
 
 	if promptYesNo("\nWould you like to download it now?", true) {
-		downloadOpts := &aws.DownloadInput{
-			Bucket:    env.S3.Bucket,
-			Key:       env.GetS3Path(),
-			VersionID: ver.VersionID,
+		downloadInput := &aws.DownloadInput{
+			Bucket: env.S3.Bucket,
+			Key:    env.GetS3Path(),
 		}
 
-		output, err := utils.GetAWSClient().DownloadFile(ctx, downloadOpts)
+		output, err := utils.GetAWSClient().DownloadFile(ctx, downloadInput)
 		if err != nil {
 			return fmt.Errorf("failed to download tfvars: %w", err)
 		}
@@ -302,9 +307,9 @@ func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Envi
 			return fmt.Errorf("failed to write tfvars file: %w", err)
 		}
 
-		fmt.Println("Successfully downloaded tfvars file.")
+		fmt.Printf("Successfully downloaded tfvars file to %s\n", env.Local.TFVarsPath)
 	} else {
-		fmt.Println("Action needed: Use 'tfvarenv download' when ready to sync.")
+		fmt.Printf("Action needed: Use 'tfvarenv download %s' when ready to sync\n", env.Name)
 	}
 
 	return nil
@@ -345,61 +350,39 @@ func handleLocalOnly(ctx context.Context, utils command.Utils, env *config.Envir
 }
 
 // ローカルとリモートの両方が存在する場合の処理
-func handleBothExist(ctx context.Context, utils command.Utils, env *config.Environment, remoteVer *version.Version) error {
+func handleBothExist(ctx context.Context, utils command.Utils, env *config.Environment) error {
+	fmt.Println("Found tfvars files in both local and remote locations")
+
+	// Download remote file to check content
+	downloadInput := &aws.DownloadInput{
+		Bucket: env.S3.Bucket,
+		Key:    env.GetS3Path(),
+	}
+	_, err := utils.GetAWSClient().DownloadFile(ctx, downloadInput)
+	if err != nil {
+		return fmt.Errorf("failed to check remote file: %w", err)
+	}
+
 	// Calculate local file hash
 	localHash, err := utils.GetFileUtils().CalculateHash(env.Local.TFVarsPath, nil)
 	if err != nil {
 		return fmt.Errorf("failed to calculate local file hash: %w", err)
 	}
 
-	if localHash == remoteVer.Hash {
-		fmt.Println("Local and remote files are in sync.")
-		fmt.Printf("\nCurrent version information:\n")
-		fmt.Printf("  Version ID: %s\n", remoteVer.VersionID[:8])
-		fmt.Printf("  Uploaded: %s\n", remoteVer.Timestamp.Format("2006-01-02 15:04:05"))
-		if remoteVer.Description != "" {
-			fmt.Printf("  Description: %s\n", remoteVer.Description)
-		}
-	} else {
-		fmt.Println("Warning: Local and remote files are different!")
-		fmt.Printf("\nRemote version information:\n")
-		fmt.Printf("  Version ID: %s\n", remoteVer.VersionID[:8])
-		fmt.Printf("  Uploaded: %s\n", remoteVer.Timestamp.Format("2006-01-02 15:04:05"))
-		if remoteVer.Description != "" {
-			fmt.Printf("  Description: %s\n", remoteVer.Description)
-		}
-
-		fmt.Println("\nAction needed: Use one of the following commands to sync files:")
-		fmt.Printf("  Download remote version: tfvarenv download %s\n", env.Name)
-		fmt.Printf("  Upload local changes:    tfvarenv upload %s\n", env.Name)
+	// Compare contents
+	remoteHash, err := utils.GetFileUtils().CalculateHash(env.Local.TFVarsPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to calculate remote file hash: %w", err)
 	}
 
-	// Get deployment status if remote exists
-	deploymentManager := deployment.NewManager(utils.GetAWSClient(), env)
-	latestDeployment, err := deploymentManager.GetLatestDeployment(ctx)
-	if err == nil && latestDeployment != nil {
-		if latestDeployment.VersionID == remoteVer.VersionID {
-			fmt.Printf("\nDeployment Status: Last deployed on %s by %s\n",
-				latestDeployment.Timestamp.Format("2006-01-02 15:04:05"),
-				latestDeployment.DeployedBy)
-		}
+	if localHash == remoteHash {
+		fmt.Println("Local and remote files are in sync")
+	} else {
+		fmt.Println("Warning: Local and remote files are different!")
+		fmt.Printf("\nAction needed: Use one of the following commands to sync files:\n")
+		fmt.Printf("  Download remote version: tfvarenv download %s\n", env.Name)
+		fmt.Printf("  Upload local version:    tfvarenv upload %s\n", env.Name)
 	}
 
 	return nil
-}
-
-// テストのためにエクスポートする型を定義
-type TestExports struct {
-	HandleNoFiles    func(fileUtils file.Utils, env *config.Environment) error
-	HandleRemoteOnly func(ctx context.Context, utils command.Utils, env *config.Environment, ver *version.Version) error
-	HandleLocalOnly  func(ctx context.Context, utils command.Utils, env *config.Environment) error
-	HandleBothExist  func(ctx context.Context, utils command.Utils, env *config.Environment, remoteVer *version.Version) error
-}
-
-// テスト用にエクスポートする関数
-var Exports = TestExports{
-	HandleNoFiles:    handleNoFiles,
-	HandleRemoteOnly: handleRemoteOnly,
-	HandleLocalOnly:  handleLocalOnly,
-	HandleBothExist:  handleBothExist,
 }

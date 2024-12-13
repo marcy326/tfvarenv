@@ -49,9 +49,14 @@ type BackendConfig struct {
 	ConfigPath string `json:"config_path"`
 }
 
-// GetS3Path returns the full S3 path for the tfvars file
+// GetS3Path returns the full path for the tfvars file (without s3:// prefix)
 func (e *Environment) GetS3Path() string {
-	return fmt.Sprintf("s3://%s/%s/%s", e.S3.Bucket, e.S3.Prefix, e.S3.TFVarsKey)
+	return fmt.Sprintf("%s/%s", e.S3.Prefix, e.S3.TFVarsKey)
+}
+
+// GetFullS3Path returns the complete S3 URI including the bucket
+func (e *Environment) GetFullS3Path() string {
+	return fmt.Sprintf("s3://%s/%s", e.S3.Bucket, e.GetS3Path())
 }
 
 // GetVersionMetadataKey returns the S3 key for version metadata

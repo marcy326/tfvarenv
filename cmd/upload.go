@@ -136,7 +136,7 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 		return fmt.Errorf("failed to record version: %w", err)
 	}
 
-	fmt.Printf("\nSuccessfully uploaded %s to %s\n", env.Local.TFVarsPath, env.GetS3Path())
+	fmt.Printf("\nSuccessfully uploaded %s to %s\n", env.Local.TFVarsPath, env.GetFullS3Path())
 	fmt.Printf("Version Information:\n")
 	fmt.Printf("  Version ID: %s\n", newVersion.VersionID[:8])
 	fmt.Printf("  Timestamp: %s\n", newVersion.Timestamp.Format("2006-01-02 15:04:05"))

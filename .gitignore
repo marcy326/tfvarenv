@@ -5,3 +5,7 @@ dev/
 /.tfvarenv.json
 .tmp/
 *.tfvars
+
+# tfvarenv
+.terraform/
+.backups/
