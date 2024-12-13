@@ -1,14 +1,28 @@
-# tfvarenv
+# tfvarenv: Terraform Environment and Variables Management CLI
 
-`tfvarenv` is a powerful CLI tool designed to simplify and enhance Terraform environment management, focusing on version control and secure handling of tfvars files.
+## Overview
+
+`tfvarenv` is a powerful CLI tool designed to simplify the management of Terraform environments and `tfvars` files. It provides a comprehensive solution for versioning, tracking, and deploying Terraform configurations across multiple environments.
 
 ## Features
 
-- **Secure Version Management**: Manage Terraform variables (tfvars) as versioned files in S3
-- **Environment Configuration**: Create and manage multiple Terraform environments
-- **AWS Integration**: Seamless AWS credentials and account management
-- **Deployment Tracking**: Track deployment history and version changes
-- **Flexible Workflows**: Support for local and remote tfvars files
+- **Environment Management**
+  - Initialize and manage multiple Terraform environments
+  - Store and version tfvars files in S3 with versioning
+  - Track deployment history
+  - Manage AWS-based backend configurations
+
+- **Version Control**
+  - Upload and download tfvars files
+  - List and track version history
+  - Filter and search versions
+  - Store version metadata
+
+- **Deployment Workflow**
+  - Plan and apply Terraform configurations
+  - Automatic backup of tfvars files
+  - Deployment approval mechanisms
+  - Tracking of deployment status
 
 ## Prerequisites
 
@@ -24,97 +38,82 @@ You can install `tfvarenv` using Homebrew:
 brew install marcy326/tap/tfvarenv
 ```
 
-## Quick Start
+## Configuration
 
-### 1. Initialize tfvarenv
+### Initialize Project
 
 ```bash
+# Initialize tfvarenv in your project
 tfvarenv init
 ```
 
-This creates a `.tfvarenv.json` configuration file and sets up your default AWS region.
-
-### 2. Add an Environment
+### Add Environment
 
 ```bash
+# Add a new environment
 tfvarenv add
 ```
 
-Follow the interactive prompts to:
-- Define environment name
-- Configure S3 bucket
-- Set up local tfvars path
-- Configure deployment settings
+Interactive prompts will guide you through:
+- Environment name and description
+- S3 bucket configuration
+- AWS region and account details
+- Local tfvars file path
+- Deployment settings
 
-### 3. Upload Local tfvars
+## Commands
 
-```bash
-tfvarenv upload dev
-```
-
-### 4. Plan and Apply Terraform Changes
-
-```bash
-# Local plan
-tfvarenv plan dev
-
-# Remote plan (using S3 version)
-tfvarenv plan dev --remote
-
-# Apply changes
-tfvarenv apply dev
-```
-
-## Key Commands
-
-- `tfvarenv init`: Initialize project configuration
-- `tfvarenv add`: Add a new environment
+### Environment Management
+- `tfvarenv init`: Initialize tfvarenv configuration
 - `tfvarenv list`: List all environments
-- `tfvarenv upload`: Upload local tfvars to S3
-- `tfvarenv download`: Download tfvars from S3
-- `tfvarenv plan`: Run Terraform plan
-- `tfvarenv apply`: Apply Terraform changes
-- `tfvarenv versions`: List version history
-- `tfvarenv history`: Show deployment history
+- `tfvarenv add`: Add a new environment
+- `tfvarenv use [environment]`: Switch to a specific environment
 
-## Configuration
+### Version Management
+- `tfvarenv versions [environment]`: List available versions
+- `tfvarenv upload [environment]`: Upload local tfvars to S3
+- `tfvarenv download [environment]`: Download tfvars from S3
 
-### .tfvarenv.json Structure
+### Terraform Workflow
+- `tfvarenv plan [environment]`: Run terraform plan
+- `tfvarenv apply [environment]`: Run terraform apply
+- `tfvarenv history [environment]`: View deployment history
 
-```json
-{
-  "version": "1.0",
-  "default_region": "us-east-1",
-  "environments": {
-    "dev": {
-      "name": "dev",
-      "description": "Development environment",
-      "s3": {
-        "bucket": "my-terraform-bucket",
-        "prefix": "terraform/dev",
-        "tfvars_key": "terraform.tfvars"
-      },
-      "aws": {
-        "account_id": "123456789012",
-        "region": "us-east-1"
-      },
-      "local": {
-        "tfvars_path": "envs/dev/terraform.tfvars"
-      },
-      "deployment": {
-        "auto_backup": true,
-        "require_approval": false
-      }
-    }
-  }
-}
+## Advanced Usage
+
+### Version Filtering
+```bash
+# List versions since a specific date
+tfvarenv versions prod --since 2024-01-01
+
+# Show only deployed versions
+tfvarenv versions dev --deployed-only
+
+# Limit version output
+tfvarenv versions staging --limit 5
 ```
+
+### Deployment Options
+```bash
+# Plan with a specific remote version
+tfvarenv plan prod --remote --version-id abc123
+
+# Apply with additional Terraform options
+tfvarenv apply dev --options "-refresh=false"
+```
+
+## Environment Configuration
+
+The `.tfvarenv.json` file contains:
+- Default AWS region
+- Environment details
+- S3 bucket configurations
+- Local and remote tfvars paths
 
 ## Security Considerations
 
-- S3 bucket must have versioning enabled
-- Supports AWS credentials via environment variables
-- Optional deployment approval workflow
+- Requires AWS credentials with appropriate S3 and STS permissions
+- Supports environment-specific approval workflows
 - Automatic backup of tfvars files
 
 ## Contributing
@@ -127,21 +126,10 @@ tfvarenv apply dev
 
 ## License
 
-[Specify your license, e.g., MIT]
+MIT License
 
-## Troubleshooting
+Distributed under the MIT License. See `LICENSE` file for more information.
 
-- Ensure AWS CLI is configured
-- Check IAM permissions for S3 and STS
-- Verify Terraform is installed
-- Review `.tfvarenv.json` configuration
+## Support
 
-## Todo
-
-- [ ] Add support for multiple cloud providers
-- [ ] Implement more advanced version filtering
-- [ ] Create comprehensive test suite
-
-## Contact
-
-[Your contact information or project maintainer details]
+For issues, feature requests, or questions, please [open an issue](https://github.com/marcy326/tfvarenv/issues) on GitHub.
