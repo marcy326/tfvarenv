@@ -94,44 +94,8 @@ func runInit(ctx context.Context, utils command.Utils) error {
 	}
 
 	// Update .gitignore
-	gitignoreEntries := []string{
-		"*.tfvars",
-		".terraform/",
-		".terraform.lock.hcl",
-		".tmp/",
-		".backups/",
-	}
-
-	var gitignoreContent string
-	existingContent, err := fileUtils.ReadFile(".gitignore")
-	if err == nil {
-		gitignoreContent = string(existingContent)
-		if !strings.HasSuffix(gitignoreContent, "\n") {
-			gitignoreContent += "\n"
-		}
-	}
-
-	// Add new entries
-	addedEntries := false
-	existing := make(map[string]bool)
-	for _, line := range strings.Split(gitignoreContent, "\n") {
-		existing[strings.TrimSpace(line)] = true
-	}
-
-	for _, entry := range gitignoreEntries {
-		if !existing[entry] {
-			if !addedEntries {
-				gitignoreContent += "\n# tfvarenv\n"
-				addedEntries = true
-			}
-			gitignoreContent += entry + "\n"
-		}
-	}
-
-	if addedEntries {
-		if err := fileUtils.WriteFile(".gitignore", []byte(gitignoreContent), writeOpts); err != nil {
-			return fmt.Errorf("failed to update .gitignore: %w", err)
-		}
+	if err := updateGitignore(fileUtils); err != nil {
+		return fmt.Errorf("failed to update .gitignore: %w", err)
 	}
 
 	fmt.Println("\nInitialization completed successfully:")
@@ -146,6 +110,53 @@ func runInit(ctx context.Context, utils command.Utils) error {
 	fmt.Println("1. Use 'tfvarenv add' to add your first environment")
 	fmt.Println("2. Configure AWS credentials if not already set")
 	fmt.Println("3. Create your Terraform configuration")
+
+	return nil
+}
+
+func updateGitignore(fileUtils file.Utils) error {
+	entries := []string{
+		"*.tfvars",
+		".terraform/",
+		".tmp/",
+		".backups/",
+	}
+
+	content, err := fileUtils.ReadFile(".gitignore")
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read .gitignore: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	existing := make(map[string]bool)
+	for _, line := range strings.Split(string(content), "\n") {
+		existing[strings.TrimSpace(line)] = true
+	}
+
+	var newContent []string
+	newContent = append(newContent, lines...)
+
+	added := false
+	for _, entry := range entries {
+		if !existing[entry] {
+			if !added {
+				if len(newContent) > 0 && newContent[len(newContent)-1] != "" {
+					newContent = append(newContent, "")
+				}
+				newContent = append(newContent, "# tfvarenv")
+				added = true
+			}
+			newContent = append(newContent, entry)
+		}
+	}
+
+	if added {
+		opts := &file.Options{
+			CreateDirs: true,
+			Overwrite:  true,
+		}
+		return fileUtils.WriteFile(".gitignore", []byte(strings.Join(newContent, "\n")+"\n"), opts)
+	}
 
 	return nil
 }

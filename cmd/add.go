@@ -129,9 +129,13 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 	}
 
 	// Backend Configuration
-	defaultBackendPath := filepath.Join("envs", envName, "backend.tfvars")
-	env.Backend = config.BackendConfig{
-		ConfigPath: defaultBackendPath,
+	defaultBackendKey := strings.TrimSuffix(tfvarsKey, ".tfvars") + ".tfbackend"
+	defaultBackendPath := filepath.Join("envs", envName, defaultBackendKey)
+	fmt.Printf("\nBackend Configuration:\nEnter backend config path [%s]: ", defaultBackendPath)
+	backendPath, _ := reader.ReadString('\n')
+	backendPath = strings.TrimSpace(backendPath)
+	if backendPath == "" {
+		backendPath = defaultBackendPath
 	}
 
 	// Deployment Configuration
@@ -149,13 +153,21 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 	fmt.Println(": done")
 
 	// Create backend configuration
-	backendData := &terraform.BackendTemplateData{
-		BucketName: bucket,
-		Region:     region,
-		Key:        fmt.Sprintf("%s/terraform.tfstate", prefix),
+	if exists, _ := utils.GetFileUtils().FileExists(backendPath); exists {
+		fmt.Printf("Backend configuration file already exists at %s, keeping existing configuration\n", backendPath)
+	} else {
+		backendData := &terraform.BackendTemplateData{
+			BucketName: bucket,
+			Region:     region,
+			Key:        fmt.Sprintf("%s/terraform.tfstate", prefix),
+		}
+		if err := terraform.CreateBackendConfig(env.Backend.ConfigPath, backendData); err != nil {
+			return fmt.Errorf("failed to create backend configuration: %w", err)
+		}
+		fmt.Printf("Created backend configuration at %s\n", backendPath)
 	}
-	if err := terraform.CreateBackendConfig(env.Backend.ConfigPath, backendData); err != nil {
-		return fmt.Errorf("failed to create backend configuration: %w", err)
+	env.Backend = config.BackendConfig{
+		ConfigPath: backendPath,
 	}
 
 	// Add environment to configuration
@@ -194,48 +206,6 @@ func setupLocalEnvironment(fileUtils file.Utils, env *config.Environment) error 
 	// Update .gitignore
 	if err := updateGitignore(fileUtils); err != nil {
 		return fmt.Errorf("failed to update .gitignore: %w", err)
-	}
-
-	return nil
-}
-
-func updateGitignore(fileUtils file.Utils) error {
-	entries := []string{
-		"*.tfvars",
-		".terraform/",
-		".terraform.lock.hcl",
-	}
-
-	content, err := fileUtils.ReadFile(".gitignore")
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read .gitignore: %w", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-	existing := make(map[string]bool)
-	for _, line := range lines {
-		existing[strings.TrimSpace(line)] = true
-	}
-
-	var newContent []string
-	newContent = append(newContent, lines...)
-
-	added := false
-	for _, entry := range entries {
-		if !existing[entry] {
-			if !added {
-				// Add a blank line before new entries if the file is not empty
-				if len(newContent) > 0 && newContent[len(newContent)-1] != "" {
-					newContent = append(newContent, "")
-				}
-				added = true
-			}
-			newContent = append(newContent, entry)
-		}
-	}
-
-	if added {
-		return fileUtils.WriteFile(".gitignore", []byte(strings.Join(newContent, "\n")+"\n"), nil)
 	}
 
 	return nil
