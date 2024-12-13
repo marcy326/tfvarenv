@@ -1,89 +1,81 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"tfvarenv/config"
-	"tfvarenv/utils"
 
 	"github.com/spf13/cobra"
+
+	"tfvarenv/utils/command"
+	"tfvarenv/utils/deployment"
+	"tfvarenv/utils/terraform"
+	"tfvarenv/utils/version"
 )
 
 func NewPlanCmd() *cobra.Command {
-	var (
-		remote    bool
-		options   string
-		versionID string
-	)
+	utils, err := command.NewUtils()
+	if err != nil {
+		fmt.Printf("Error initializing command utils: %v\n", err)
+		os.Exit(1)
+	}
+
+	var opts terraform.PlanOptions
 
 	planCmd := &cobra.Command{
 		Use:   "plan [environment]",
 		Short: "Run terraform plan for the specified environment",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			envName := args[0]
-			if err := runPlan(envName, remote, versionID, options); err != nil {
+			opts.Environment, err = utils.GetEnvironment(args[0])
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			if err := runPlan(cmd.Context(), utils, &opts); err != nil {
 				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	planCmd.Flags().BoolVar(&remote, "remote", false, "Use remote tfvars file from S3")
-	planCmd.Flags().StringVar(&options, "options", "", "Additional options for terraform plan")
-	planCmd.Flags().StringVar(&versionID, "version-id", "", "Specific version ID to use (only with --remote)")
+	planCmd.Flags().BoolVar(&opts.Remote, "remote", false, "Use remote tfvars file from S3")
+	planCmd.Flags().StringVarP(&opts.VarFile, "var-file", "v", "", "Path to terraform.tfvars file")
+	planCmd.Flags().StringVar(&opts.VersionID, "version-id", "", "Specific version ID to use (only with --remote)")
+	planCmd.Flags().StringSliceVar(&opts.Options, "options", nil, "Additional options for terraform plan")
 
 	return planCmd
 }
 
-func runPlan(envName string, remote bool, versionID, options string) error {
-	env, err := config.GetEnvironmentInfo(envName)
-	if err != nil {
-		return fmt.Errorf("failed to get environment info: %w", err)
-	}
+func runPlan(ctx context.Context, utils command.Utils, opts *terraform.PlanOptions) error {
+	// Get version information if using remote
+	if opts.Remote {
+		versionManager := version.NewManager(utils.GetAWSClient(), utils.GetFileUtils(), opts.Environment)
+		var ver *version.Version
+		var err error
 
-	if remote {
-		// Get version information
-		var version *utils.Version
-		if versionID != "" {
-			versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to get versions: %w", err)
-			}
-			for _, v := range versions {
-				if v.VersionID == versionID {
-					version = &v
-					break
-				}
-			}
-			if version == nil {
-				return fmt.Errorf("version ID %s not found", versionID)
-			}
+		if opts.VersionID != "" {
+			ver, err = versionManager.GetVersion(ctx, opts.VersionID)
 		} else {
-			versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{
-				LatestOnly: true,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to get versions: %w", err)
-			}
-			if len(versions) == 0 {
-				return fmt.Errorf("no versions found")
-			}
-			version = &versions[0]
-			versionID = version.VersionID
+			ver, err = versionManager.GetLatestVersion(ctx)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to get version information: %w", err)
 		}
 
 		// Display version information
 		fmt.Printf("\nPlanning with version:\n")
-		fmt.Printf("  Version ID: %s\n", version.VersionID[:8])
-		fmt.Printf("  Uploaded: %s by %s\n", version.Timestamp.Format("2006-01-02 15:04:05"), version.UploadedBy)
-		if version.Description != "" {
-			fmt.Printf("  Description: %s\n", version.Description)
+		fmt.Printf("  Version ID: %s\n", ver.VersionID[:8])
+		fmt.Printf("  Uploaded: %s\n", ver.Timestamp.Format("2006-01-02 15:04:05"))
+		if ver.Description != "" {
+			fmt.Printf("  Description: %s\n", ver.Description)
 		}
 
-		// Get and display deployment status
-		if latestDeploy, err := utils.GetLatestDeployment(env); err == nil && latestDeploy != nil {
-			if latestDeploy.VersionID == version.VersionID {
+		// Get deployment status
+		deploymentManager := deployment.NewManager(utils.GetAWSClient(), opts.Environment)
+		if latestDeploy, err := deploymentManager.GetLatestDeployment(ctx); err == nil && latestDeploy != nil {
+			if latestDeploy.VersionID == ver.VersionID {
 				fmt.Printf("  Deployment Status: Currently deployed (since %s)\n",
 					latestDeploy.Timestamp.Format("2006-01-02 15:04:05"))
 			} else {
@@ -93,32 +85,34 @@ func runPlan(envName string, remote bool, versionID, options string) error {
 		}
 
 		// Check if using older version
-		versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{
-			LatestOnly: true,
-		})
-		if err == nil && len(versions) > 0 && versions[0].VersionID != version.VersionID {
-			fmt.Printf("\nWarning: You are planning with version %s, but a newer version exists:\n", version.VersionID[:8])
-			fmt.Printf("  Latest Version: %s\n", versions[0].VersionID[:8])
+		if latestVer, err := versionManager.GetLatestVersion(ctx); err == nil &&
+			latestVer.VersionID != ver.VersionID {
+			fmt.Printf("\nWarning: You are planning with version %s, but a newer version exists:\n",
+				ver.VersionID[:8])
+			fmt.Printf("  Latest Version: %s\n", latestVer.VersionID[:8])
 			fmt.Printf("  Uploaded: %s by %s\n",
-				versions[0].Timestamp.Format("2006-01-02 15:04:05"),
-				versions[0].UploadedBy)
-			if versions[0].Description != "" {
-				fmt.Printf("  Description: %s\n", versions[0].Description)
+				latestVer.Timestamp.Format("2006-01-02 15:04:05"),
+				latestVer.UploadedBy)
+			if latestVer.Description != "" {
+				fmt.Printf("  Description: %s\n", latestVer.Description)
 			}
 		}
 
 		fmt.Println() // Add empty line for readability
+		opts.VersionID = ver.VersionID
 	}
 
 	// Run terraform plan
-	if err := utils.RunTerraformCommand("plan", env, remote, versionID, options); err != nil {
+	_, err := utils.GetTerraformRunner().Plan(ctx, opts)
+	if err != nil {
 		return fmt.Errorf("terraform plan failed: %w", err)
 	}
 
-	// Show next steps
-	if remote {
+	// Show next steps if using remote version
+	if opts.Remote {
 		fmt.Printf("\nTo apply this plan with the same version:\n")
-		fmt.Printf("  tfvarenv apply %s --remote --version-id %s\n", envName, versionID)
+		fmt.Printf("  tfvarenv apply %s --remote --version-id %s\n",
+			opts.Environment.Name, opts.VersionID)
 	}
 
 	return nil

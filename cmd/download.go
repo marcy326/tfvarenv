@@ -1,16 +1,27 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"tfvarenv/config"
-	"tfvarenv/utils"
 
 	"github.com/spf13/cobra"
+
+	"tfvarenv/utils/aws"
+	"tfvarenv/utils/command"
+	"tfvarenv/utils/deployment"
+	"tfvarenv/utils/file"
+	"tfvarenv/utils/version"
 )
 
 func NewDownloadCmd() *cobra.Command {
+	utils, err := command.NewUtils()
+	if err != nil {
+		fmt.Printf("Error initializing command utils: %v\n", err)
+		os.Exit(1)
+	}
+
 	var (
 		versionID string
 		force     bool
@@ -21,9 +32,8 @@ func NewDownloadCmd() *cobra.Command {
 		Short: "Download tfvars file from S3 to local path",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			envName := args[0]
-			if err := runDownload(envName, versionID, force); err != nil {
-				fmt.Printf("Error downloading tfvars: %v\n", err)
+			if err := runDownload(cmd.Context(), utils, args[0], versionID, force); err != nil {
+				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
@@ -31,69 +41,62 @@ func NewDownloadCmd() *cobra.Command {
 
 	downloadCmd.Flags().StringVar(&versionID, "version-id", "", "Specific version ID to download")
 	downloadCmd.Flags().BoolVarP(&force, "force", "f", false, "Force download without confirmation")
+
 	return downloadCmd
 }
 
-func runDownload(envName, versionID string, force bool) error {
-	env, err := config.GetEnvironmentInfo(envName)
+func runDownload(ctx context.Context, utils command.Utils, envName, versionID string, force bool) error {
+	env, err := utils.GetEnvironment(envName)
 	if err != nil {
 		return fmt.Errorf("environment not found: %w", err)
 	}
 
+	versionManager := version.NewManager(utils.GetAWSClient(), utils.GetFileUtils(), env)
+
 	// Get version information
-	var version *utils.Version
+	var ver *version.Version
 	if versionID != "" {
-		versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to get versions: %w", err)
-		}
-		for _, v := range versions {
-			if v.VersionID == versionID {
-				version = &v
-				break
-			}
-		}
-		if version == nil {
-			return fmt.Errorf("version ID %s not found", versionID)
-		}
+		ver, err = versionManager.GetVersion(ctx, versionID)
 	} else {
-		versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{
-			LatestOnly: true,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to get versions: %w", err)
-		}
-		if len(versions) == 0 {
-			return fmt.Errorf("no versions found")
-		}
-		version = &versions[0]
-		versionID = version.VersionID
+		ver, err = versionManager.GetLatestVersion(ctx)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get version information: %w", err)
 	}
 
 	// Display version information
 	fmt.Printf("\nDownloading version:\n")
-	fmt.Printf("  Version ID: %s\n", version.VersionID[:8])
-	fmt.Printf("  Uploaded: %s by %s\n", version.Timestamp.Format("2006-01-02 15:04:05"), version.UploadedBy)
-	if version.Description != "" {
-		fmt.Printf("  Description: %s\n", version.Description)
+	fmt.Printf("  Version ID: %s\n", ver.VersionID[:8])
+	fmt.Printf("  Uploaded: %s by %s\n",
+		ver.Timestamp.Format("2006-01-02 15:04:05"),
+		ver.UploadedBy)
+	if ver.Description != "" {
+		fmt.Printf("  Description: %s\n", ver.Description)
 	}
 
-	// Get and display deployment status
-	if latestDeploy, err := utils.GetLatestDeployment(env); err == nil && latestDeploy != nil {
-		if latestDeploy.VersionID == version.VersionID {
+	// Get deployment status
+	deploymentManager := deployment.NewManager(utils.GetAWSClient(), env)
+	if latestDeploy, err := deploymentManager.GetLatestDeployment(ctx); err == nil && latestDeploy != nil {
+		if latestDeploy.VersionID == ver.VersionID {
 			fmt.Printf("  Deployment Status: Currently deployed (since %s)\n",
 				latestDeploy.Timestamp.Format("2006-01-02 15:04:05"))
 		}
 	}
 
 	// Check local file
-	if _, err := os.Stat(env.Local.TFVarsPath); err == nil {
-		localHash, err := utils.CalculateFileHash(env.Local.TFVarsPath)
+	fileUtils := utils.GetFileUtils()
+	exists, err := fileUtils.FileExists(env.Local.TFVarsPath)
+	if err != nil {
+		return fmt.Errorf("failed to check local file: %w", err)
+	}
+
+	if exists {
+		localHash, err := fileUtils.CalculateHash(env.Local.TFVarsPath, nil)
 		if err != nil {
 			return fmt.Errorf("failed to calculate local file hash: %w", err)
 		}
 
-		if localHash == version.Hash {
+		if localHash == ver.Hash {
 			fmt.Println("\nLocal file is identical to the requested version. No download needed.")
 			return nil
 		}
@@ -106,27 +109,35 @@ func runDownload(envName, versionID string, force bool) error {
 		}
 
 		// Create backup
-		backupDir := filepath.Join(".backups", envName)
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			return fmt.Errorf("failed to create backup directory: %w", err)
+		backupOpts := &file.BackupOptions{
+			BasePath:   filepath.Join(".backups", envName),
+			TimeFormat: "20060102150405",
 		}
-
-		backupPath := filepath.Join(backupDir,
-			fmt.Sprintf("terraform.tfvars.backup.%s", filepath.Base(env.Local.TFVarsPath)))
-		if err := utils.CopyFile(env.Local.TFVarsPath, backupPath); err != nil {
+		if backupPath, err := fileUtils.CreateBackup(env.Local.TFVarsPath, backupOpts); err != nil {
 			return fmt.Errorf("failed to create backup: %w", err)
+		} else {
+			fmt.Printf("\nCreated backup: %s\n", backupPath)
 		}
-		fmt.Printf("\nCreated backup: %s\n", backupPath)
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(env.Local.TFVarsPath), 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Download the file
-	if err := utils.DownloadTFVars(envName, versionID); err != nil {
+	downloadInput := &aws.DownloadInput{
+		Bucket:    env.S3.Bucket,
+		Key:       env.GetS3Path(),
+		VersionID: ver.VersionID,
+	}
+	output, err := utils.GetAWSClient().DownloadFile(ctx, downloadInput)
+	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
+	}
+
+	// Write the file
+	writeOpts := &file.Options{
+		CreateDirs: true,
+		Overwrite:  true,
+	}
+	if err := fileUtils.WriteFile(env.Local.TFVarsPath, output.Content, writeOpts); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	fmt.Printf("\nSuccessfully downloaded to: %s\n", env.Local.TFVarsPath)

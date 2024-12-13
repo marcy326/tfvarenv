@@ -1,4 +1,4 @@
-package utils
+package terraform
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ region         = "{{ .Region }}"
 key            = "{{ .Key }}"
 `
 
-// CreateDefaultBackendConfig creates a default backend configuration file
+// CreateBackendConfig creates a default backend configuration file
 func CreateBackendConfig(path string, data *BackendTemplateData) error {
 	// Check if file already exists
 	if _, err := os.Stat(path); err == nil {
@@ -50,5 +50,16 @@ func CreateBackendConfig(path string, data *BackendTemplateData) error {
 		return fmt.Errorf("failed to write template: %w", err)
 	}
 
+	return nil
+}
+
+// ValidateBackendConfig validates the backend configuration
+func ValidateBackendConfig(path string) error {
+	// Check if file exists
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("backend config file not found at %s", path)
+	}
+
+	// TODO: Add more validation logic if needed
 	return nil
 }

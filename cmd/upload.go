@@ -1,17 +1,27 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"tfvarenv/config"
-	"tfvarenv/utils"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"tfvarenv/utils/aws"
+	"tfvarenv/utils/command"
+	"tfvarenv/utils/file"
+	"tfvarenv/utils/version"
 )
 
 func NewUploadCmd() *cobra.Command {
+	utils, err := command.NewUtils()
+	if err != nil {
+		fmt.Printf("Error initializing command utils: %v\n", err)
+		os.Exit(1)
+	}
+
 	var (
 		description string
 		autoBackup  bool
@@ -22,9 +32,8 @@ func NewUploadCmd() *cobra.Command {
 		Short: "Upload local tfvars file to S3",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			envName := args[0]
-			if err := runUpload(envName, description, autoBackup); err != nil {
-				fmt.Printf("Error uploading tfvars: %v\n", err)
+			if err := runUpload(cmd.Context(), utils, args[0], description, autoBackup); err != nil {
+				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
@@ -36,48 +45,47 @@ func NewUploadCmd() *cobra.Command {
 	return uploadCmd
 }
 
-func runUpload(envName string, description string, autoBackup bool) error {
-	env, err := config.GetEnvironmentInfo(envName)
+func runUpload(ctx context.Context, utils command.Utils, envName, description string, autoBackup bool) error {
+	env, err := utils.GetEnvironment(envName)
 	if err != nil {
 		return fmt.Errorf("environment not found: %w", err)
 	}
 
+	fileUtils := utils.GetFileUtils()
+
 	// Check if local file exists
-	if _, err := os.Stat(env.Local.TFVarsPath); err != nil {
-		return fmt.Errorf("local file not found: %w", err)
+	exists, err := fileUtils.FileExists(env.Local.TFVarsPath)
+	if err != nil {
+		return fmt.Errorf("failed to check local file: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("local file not found: %s", env.Local.TFVarsPath)
 	}
 
-	// Calculate file hash
-	hash, err := utils.CalculateFileHash(env.Local.TFVarsPath)
+	// Calculate file hash and get info
+	fileInfo, err := fileUtils.GetFileInfo(env.Local.TFVarsPath)
 	if err != nil {
-		return fmt.Errorf("failed to calculate file hash: %w", err)
+		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
 	// Check for duplicate content
-	versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{
-		LatestOnly: true,
-	})
-	if err == nil && len(versions) > 0 {
-		latestVersion := versions[0]
-		if latestVersion.Hash == hash {
-			fmt.Println("Local file is identical to the latest version in S3. No upload needed.")
-			fmt.Printf("Latest version: %s (uploaded at %s)\n",
-				latestVersion.VersionID[:8], latestVersion.Timestamp.Format("2006-01-02 15:04:05"))
-			return nil
-		}
+	versionManager := version.NewManager(utils.GetAWSClient(), fileUtils, env)
+	latestVer, err := versionManager.GetLatestVersion(ctx)
+	if err == nil && latestVer != nil && latestVer.Hash == fileInfo.Hash {
+		fmt.Println("Local file is identical to the latest version in S3. No upload needed.")
+		fmt.Printf("Latest version: %s (uploaded at %s)\n",
+			latestVer.VersionID[:8], latestVer.Timestamp.Format("2006-01-02 15:04:05"))
+		return nil
 	}
 
 	// Create backup if enabled
 	if autoBackup {
-		backupDir := filepath.Join(".backups", envName)
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			return fmt.Errorf("failed to create backup directory: %w", err)
+		backupOpts := &file.BackupOptions{
+			BasePath:   filepath.Join(".backups", envName),
+			TimeFormat: "20060102150405",
 		}
-
-		backupPath := filepath.Join(backupDir,
-			fmt.Sprintf("terraform.tfvars.%s", time.Now().Format("20060102150405")))
-
-		if err := utils.CopyFile(env.Local.TFVarsPath, backupPath); err != nil {
+		backupPath, err := fileUtils.CreateBackup(env.Local.TFVarsPath, backupOpts)
+		if err != nil {
 			return fmt.Errorf("failed to create backup: %w", err)
 		}
 		fmt.Printf("Created backup: %s\n", backupPath)
@@ -89,51 +97,58 @@ func runUpload(envName string, description string, autoBackup bool) error {
 		fmt.Scanln(&description)
 	}
 
-	// Get file size
-	fileInfo, err := os.Stat(env.Local.TFVarsPath)
+	// Read file content
+	content, err := fileUtils.ReadFile(env.Local.TFVarsPath)
 	if err != nil {
-		return fmt.Errorf("failed to get file info: %w", err)
+		return fmt.Errorf("failed to read local file: %w", err)
 	}
 
 	// Upload to S3
-	versionInfo, err := utils.UploadToS3WithVersioning(
-		env.Local.TFVarsPath,
-		env.GetS3Path(),
-		env.AWS.Region,
-		description,
-	)
+	uploadInput := &aws.UploadInput{
+		Bucket:      env.S3.Bucket,
+		Key:         env.GetS3Path(),
+		Content:     content,
+		Description: description,
+		Metadata: map[string]string{
+			"Hash":        fileInfo.Hash,
+			"Description": description,
+			"UploadedBy":  os.Getenv("USER"),
+		},
+	}
+
+	uploadOutput, err := utils.GetAWSClient().UploadFile(ctx, uploadInput)
 	if err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
 
 	// Create version record
-	version := &utils.Version{
-		VersionID:   versionInfo.VersionID,
+	newVersion := &version.Version{
+		VersionID:   uploadOutput.VersionID,
+		Hash:        fileInfo.Hash,
 		Timestamp:   time.Now(),
-		Hash:        hash,
 		Description: description,
 		UploadedBy:  os.Getenv("USER"),
-		Size:        fileInfo.Size(),
+		Size:        fileInfo.Size,
 	}
 
 	// Add version to management
-	if err := utils.AddVersion(env, version); err != nil {
+	if err := versionManager.AddVersion(ctx, newVersion); err != nil {
 		return fmt.Errorf("failed to record version: %w", err)
 	}
 
 	fmt.Printf("\nSuccessfully uploaded %s to %s\n", env.Local.TFVarsPath, env.GetS3Path())
 	fmt.Printf("Version Information:\n")
-	fmt.Printf("  Version ID: %s\n", version.VersionID[:8])
-	fmt.Printf("  Timestamp: %s\n", version.Timestamp.Format("2006-01-02 15:04:05"))
-	fmt.Printf("  Size: %d bytes\n", version.Size)
-	if version.Description != "" {
-		fmt.Printf("  Description: %s\n", version.Description)
+	fmt.Printf("  Version ID: %s\n", newVersion.VersionID[:8])
+	fmt.Printf("  Timestamp: %s\n", newVersion.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Printf("  Size: %d bytes\n", newVersion.Size)
+	if newVersion.Description != "" {
+		fmt.Printf("  Description: %s\n", newVersion.Description)
 	}
 
 	// Show deployment guidance
 	fmt.Printf("\nTo deploy this version:\n")
-	fmt.Printf("  Plan:   tfvarenv plan %s --remote --version-id %s\n", envName, version.VersionID)
-	fmt.Printf("  Apply:  tfvarenv apply %s --remote --version-id %s\n", envName, version.VersionID)
+	fmt.Printf("  Plan:   tfvarenv plan %s --remote --version-id %s\n", envName, newVersion.VersionID)
+	fmt.Printf("  Apply:  tfvarenv apply %s --remote --version-id %s\n", envName, newVersion.VersionID)
 
 	return nil
 }
