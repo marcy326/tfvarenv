@@ -136,6 +136,12 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println(": done")
 
+	// Backend Configuration
+	if err := configureBackend(envName, env); err != nil {
+		fmt.Printf("Error configuring backend: %v\n", err)
+		return
+	}
+
 	// Add environment to configuration
 	fmt.Print("\nAdding environment to .tfvarenv.json")
 	if err := config.AddEnvironment(envName, env); err != nil {
@@ -143,17 +149,6 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	fmt.Println(": done")
-
-	// Check file status and provide guidance
-	if err := checkFilesStatus(env); err != nil {
-		fmt.Printf("Warning: Failed to check file status: %v\n", err)
-	} else {
-		fmt.Println("\nUse the following commands to manage tfvars:")
-		fmt.Printf("- Download: tfvarenv download %s\n", envName)
-		fmt.Printf("- Upload:   tfvarenv upload %s\n", envName)
-		fmt.Printf("- Plan:     tfvarenv plan %s\n", envName)
-		fmt.Printf("- Apply:    tfvarenv apply %s\n", envName)
-	}
 
 	fmt.Printf("\nEnvironment '%s' added successfully.\n", envName)
 }
@@ -347,5 +342,72 @@ func checkFilesStatus(env *config.Environment) error {
 		}
 	}
 
+	return nil
+}
+
+func configureBackend(envName string, env *config.Environment) error {
+	fmt.Println("\nBackend Configuration:")
+	defaultBackendPath := filepath.Join("envs", envName, "terraform.tfbackend")
+	env.Backend = config.BackendConfig{
+		ConfigPath: defaultBackendPath,
+	}
+
+	// Check if backend file already exists
+	if _, err := os.Stat(defaultBackendPath); err == nil {
+		fmt.Printf("Backend configuration file already exists at: %s\n", defaultBackendPath)
+		fmt.Println("Please review and modify if needed.")
+		return nil
+	}
+
+	// Create backend directory
+	backendDir := filepath.Dir(defaultBackendPath)
+	if err := os.MkdirAll(backendDir, 0755); err != nil {
+		return fmt.Errorf("Error creating backend directory: %w", err)
+	}
+
+	fmt.Printf("Backend configuration file not found at: %s\n", defaultBackendPath)
+	fmt.Print("Would you like to create it interactively? [Y/n]: ")
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "" || response == "y" || response == "yes" {
+		// Interactive backend configuration
+		fmt.Print("Enter bucket name: ")
+		bucket, _ := reader.ReadString('\n')
+		bucket = strings.TrimSpace(bucket)
+
+		defaultStateKey := fmt.Sprintf("%s/terraform.tfstate", env.S3.Prefix)
+		fmt.Printf("Enter state file key [%s]: ", defaultStateKey)
+		key, _ := reader.ReadString('\n')
+		key = strings.TrimSpace(key)
+		if key == "" {
+			key = defaultStateKey
+		}
+
+		fmt.Printf("Enter region [%s]: ", env.AWS.Region)
+		region, _ := reader.ReadString('\n')
+		region = strings.TrimSpace(region)
+		if region == "" {
+			region = env.AWS.Region
+		}
+
+		// Create backend configuration file
+		content := fmt.Sprintf(`bucket = "%s"
+key    = "%s"
+region = "%s"`, bucket, key, region)
+
+		if err := os.WriteFile(defaultBackendPath, []byte(content), 0644); err != nil {
+			return fmt.Errorf("Error creating backend configuration: %w", err)
+		}
+	} else {
+		// Create empty file
+		if err := os.WriteFile(defaultBackendPath, []byte(""), 0644); err != nil {
+			return fmt.Errorf("Error creating empty backend configuration: %w", err)
+		}
+	}
+
+	fmt.Printf("\nBackend configuration created at: %s\n", defaultBackendPath)
+	fmt.Println("Please review and modify if needed before running 'tfvarenv use'")
 	return nil
 }

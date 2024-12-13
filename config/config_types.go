@@ -24,6 +24,7 @@ type Environment struct {
 	AWS         AWSConfig           `json:"aws"`
 	Local       LocalConfig         `json:"local"`
 	Deployment  DeploymentConfig    `json:"deployment"`
+	Backend     BackendConfig       `json:"backend"`
 }
 
 // EnvironmentS3Config represents environment-specific S3 settings
@@ -48,6 +49,11 @@ type LocalConfig struct {
 type DeploymentConfig struct {
 	AutoBackup      bool `json:"auto_backup"`
 	RequireApproval bool `json:"require_approval"`
+}
+
+// BackendConfig represents backend configuration settings
+type BackendConfig struct {
+	ConfigPath string `json:"config_path"` // backend configファイルのパス
 }
 
 // GetS3Path returns the full S3 path for the tfvars file
