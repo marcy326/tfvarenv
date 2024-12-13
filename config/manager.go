@@ -65,16 +65,19 @@ func (m *manager) load() error {
 	return nil
 }
 
-func (m *manager) Save() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+func (m *manager) save() error {
 	data, err := json.MarshalIndent(m.config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
 	return os.WriteFile(m.configPath, append(data, '\n'), 0644)
+}
+
+func (m *manager) Save() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.save()
 }
 
 func (m *manager) GetEnvironment(name string) (*Environment, error) {
@@ -90,19 +93,20 @@ func (m *manager) GetEnvironment(name string) (*Environment, error) {
 }
 
 func (m *manager) AddEnvironment(name string, env *Environment) error {
+	// ロックを取得する前に検証を行う
+	if err := validateEnvironment(env); err != nil {
+		return fmt.Errorf("invalid environment configuration: %w", err)
+	}
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.mu.Unlock() // deferを使用してロックの解放を保証
 
 	if _, exists := m.config.Environments[name]; exists {
 		return fmt.Errorf("environment '%s' already exists", name)
 	}
 
-	if err := validateEnvironment(env); err != nil {
-		return fmt.Errorf("invalid environment configuration: %w", err)
-	}
-
 	m.config.Environments[name] = *env
-	return m.Save()
+	return m.save() // Save()をprivateのsave()に変更
 }
 
 func (m *manager) ListEnvironments() ([]string, error) {

@@ -165,15 +165,19 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 	}
 	fmt.Println(": done")
 
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- checkFilesStatus(ctx, utils, env)
+	}()
+
 	// Check file status
-	if err := checkFilesStatus(ctx, utils, env); err != nil {
-		fmt.Printf("Warning: Failed to check file status: %v\n", err)
-	} else {
-		fmt.Println("\nUse the following commands to manage tfvars:")
-		fmt.Printf("- Download: tfvarenv download %s\n", envName)
-		fmt.Printf("- Upload:   tfvarenv upload %s\n", envName)
-		fmt.Printf("- Plan:     tfvarenv plan %s\n", envName)
-		fmt.Printf("- Apply:    tfvarenv apply %s\n", envName)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errChan:
+		if err != nil {
+			fmt.Printf("Warning: Failed to check file status: %v\n", err)
+		}
 	}
 
 	fmt.Printf("\nEnvironment '%s' added successfully.\n", envName)
