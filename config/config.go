@@ -1,22 +1,15 @@
 package config
 
-import (
-	"fmt"
-)
+import "fmt"
 
-const (
-	configFileName = ".tfvarenv.json"
-	defaultVersion = "1.0"
-)
-
-// Config represents the root configuration structure
+// Config構造体の定義
 type Config struct {
 	Version       string                 `json:"version"`
 	DefaultRegion string                 `json:"default_region"`
 	Environments  map[string]Environment `json:"environments"`
 }
 
-// Environment represents a single environment configuration
+// Environment構造体の定義
 type Environment struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
@@ -27,33 +20,33 @@ type Environment struct {
 	Backend     BackendConfig       `json:"backend"`
 }
 
-// EnvironmentS3Config represents environment-specific S3 settings
+// EnvironmentS3Config構造体の定義
 type EnvironmentS3Config struct {
 	Bucket    string `json:"bucket"`
 	Prefix    string `json:"prefix"`
 	TFVarsKey string `json:"tfvars_key"`
 }
 
-// AWSConfig represents AWS-specific settings
+// AWSConfig構造体の定義
 type AWSConfig struct {
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
 }
 
-// LocalConfig represents local file settings
+// LocalConfig構造体の定義
 type LocalConfig struct {
 	TFVarsPath string `json:"tfvars_path"`
 }
 
-// DeploymentConfig represents deployment settings
+// DeploymentConfig構造体の定義
 type DeploymentConfig struct {
 	AutoBackup      bool `json:"auto_backup"`
 	RequireApproval bool `json:"require_approval"`
 }
 
-// BackendConfig represents backend configuration settings
+// BackendConfig構造体の定義
 type BackendConfig struct {
-	ConfigPath string `json:"config_path"` // backend configファイルのパス
+	ConfigPath string `json:"config_path"`
 }
 
 // GetS3Path returns the full S3 path for the tfvars file

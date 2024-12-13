@@ -1,124 +1,116 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"tfvarenv/config"
-	"tfvarenv/utils"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"tfvarenv/utils/command"
+	"tfvarenv/utils/deployment"
+	"tfvarenv/utils/terraform"
+	"tfvarenv/utils/version"
 )
 
 func NewApplyCmd() *cobra.Command {
-	var (
-		remote    bool
-		options   string
-		versionID string
-	)
+	utils, err := command.NewUtils()
+	if err != nil {
+		fmt.Printf("Error initializing command utils: %v\n", err)
+		os.Exit(1)
+	}
+
+	var opts terraform.ApplyOptions
 
 	applyCmd := &cobra.Command{
 		Use:   "apply [environment]",
 		Short: "Run terraform apply for the specified environment",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			envName := args[0]
-			if err := runApply(envName, remote, versionID, options); err != nil {
+			opts.Environment, err = utils.GetEnvironment(args[0])
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			if err := runApply(cmd.Context(), utils, &opts); err != nil {
 				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	applyCmd.Flags().BoolVar(&remote, "remote", false, "Use remote tfvars file from S3")
-	applyCmd.Flags().StringVar(&options, "options", "", "Additional options for terraform apply")
-	applyCmd.Flags().StringVar(&versionID, "version-id", "", "Specific version ID to use (only with --remote)")
+	applyCmd.Flags().BoolVar(&opts.Remote, "remote", false, "Use remote tfvars file from S3")
+	applyCmd.Flags().StringVarP(&opts.VarFile, "var-file", "v", "", "Path to terraform.tfvars file")
+	applyCmd.Flags().StringVar(&opts.VersionID, "version-id", "", "Specific version ID to use (only with --remote)")
+	applyCmd.Flags().StringSliceVar(&opts.Options, "options", nil, "Additional options for terraform apply")
+	applyCmd.Flags().BoolVar(&opts.AutoApprove, "auto-approve", false, "Skip interactive approval of plan")
 
 	return applyCmd
 }
 
-func runApply(envName string, remote bool, versionID, options string) error {
-	env, err := config.GetEnvironmentInfo(envName)
-	if err != nil {
-		return fmt.Errorf("failed to get environment info: %w", err)
-	}
+func runApply(ctx context.Context, utils command.Utils, opts *terraform.ApplyOptions) error {
+	// Get version information if using remote
+	if opts.Remote {
+		versionManager := version.NewManager(utils.GetAWSClient(), utils.GetFileUtils(), opts.Environment)
+		var ver *version.Version
+		var err error
 
-	if remote {
-		// Get version information
-		var version *utils.Version
-		if versionID != "" {
-			versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to get versions: %w", err)
-			}
-			for _, v := range versions {
-				if v.VersionID == versionID {
-					version = &v
-					break
-				}
-			}
-			if version == nil {
-				return fmt.Errorf("version ID %s not found", versionID)
-			}
+		if opts.VersionID != "" {
+			ver, err = versionManager.GetVersion(ctx, opts.VersionID)
 		} else {
-			versions, err := utils.GetVersions(env, &utils.VersionQueryOptions{
-				LatestOnly: true,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to get versions: %w", err)
-			}
-			if len(versions) == 0 {
-				return fmt.Errorf("no versions found")
-			}
-			version = &versions[0]
-			versionID = version.VersionID
+			ver, err = versionManager.GetLatestVersion(ctx)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to get version information: %w", err)
 		}
 
 		// Display version information
-		fmt.Printf("\nVersion to be applied:\n")
-		fmt.Printf("  Version ID: %s\n", version.VersionID[:8])
-		fmt.Printf("  Uploaded: %s by %s\n", version.Timestamp.Format("2006-01-02 15:04:05"), version.UploadedBy)
-		if version.Description != "" {
-			fmt.Printf("  Description: %s\n", version.Description)
+		fmt.Printf("\nApplying version:\n")
+		fmt.Printf("  Version ID: %s\n", ver.VersionID[:8])
+		fmt.Printf("  Uploaded: %s by %s\n",
+			ver.Timestamp.Format("2006-01-02 15:04:05"),
+			ver.UploadedBy)
+		if ver.Description != "" {
+			fmt.Printf("  Description: %s\n", ver.Description)
 		}
 
-		// Get and display latest deployment if exists
-		if latestDeploy, err := utils.GetLatestDeployment(env); err == nil && latestDeploy != nil {
-			fmt.Printf("  Last Deployed: %s by %s\n",
-				latestDeploy.Timestamp.Format("2006-01-02 15:04:05"),
-				latestDeploy.DeployedBy)
-		}
+		opts.VersionID = ver.VersionID
 	}
 
-	// Get deployment approval
-	if env.Deployment.RequireApproval {
-		if !promptYesNo(fmt.Sprintf("\nDo you want to proceed with applying to %s environment?", envName), false) {
+	// Get deployment approval if required
+	if opts.Environment.Deployment.RequireApproval && !opts.AutoApprove {
+		if !promptYesNo(fmt.Sprintf("\nDo you want to proceed with applying to %s environment?",
+			opts.Environment.Name), false) {
 			return fmt.Errorf("deployment cancelled by user")
 		}
 	}
 
 	// Run terraform apply
-	if err := utils.RunTerraformCommand("apply", env, remote, versionID, options); err != nil {
+	_, err := utils.GetTerraformRunner().Apply(ctx, opts)
+	if err != nil {
 		return fmt.Errorf("terraform apply failed: %w", err)
 	}
 
-	// Record deployment
-	if remote {
-		deployRecord := &utils.DeploymentRecord{
+	// Record deployment if successful and using remote version
+	if opts.Remote {
+		deploymentManager := deployment.NewManager(utils.GetAWSClient(), opts.Environment)
+		record := &deployment.Record{
 			Timestamp:  time.Now(),
-			VersionID:  versionID,
+			VersionID:  opts.VersionID,
 			DeployedBy: os.Getenv("USER"),
 			Command:    "apply",
 			Status:     "success",
 		}
 
-		if err := utils.AddDeploymentRecord(env, deployRecord); err != nil {
+		if err := deploymentManager.AddRecord(ctx, record); err != nil {
 			fmt.Printf("Warning: Failed to record deployment: %v\n", err)
 		} else {
 			fmt.Printf("\nDeployment recorded:\n")
-			fmt.Printf("  Version: %s\n", versionID[:8])
-			fmt.Printf("  Time: %s\n", deployRecord.Timestamp.Format("2006-01-02 15:04:05"))
-			fmt.Printf("  By: %s\n", deployRecord.DeployedBy)
+			fmt.Printf("  Version: %s\n", opts.VersionID[:8])
+			fmt.Printf("  Time: %s\n", record.Timestamp.Format("2006-01-02 15:04:05"))
+			fmt.Printf("  By: %s\n", record.DeployedBy)
 		}
 	}
 

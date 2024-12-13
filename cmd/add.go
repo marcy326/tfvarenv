@@ -2,35 +2,43 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"tfvarenv/config"
-	"tfvarenv/utils"
 
 	"github.com/spf13/cobra"
+
+	"tfvarenv/config"
+	"tfvarenv/utils/aws"
+	"tfvarenv/utils/command"
+	"tfvarenv/utils/deployment"
+	"tfvarenv/utils/file"
+	"tfvarenv/utils/terraform"
+	"tfvarenv/utils/version"
 )
 
 func NewAddCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "add",
-		Short: "Add a new environment",
-		Run:   addEnvironment,
-	}
-}
-
-func addEnvironment(cmd *cobra.Command, args []string) {
-	// Check if tfvarenv is initialized
-	if _, err := os.Stat(".tfvarenv.json"); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("tfvarenv is not initialized. Please run 'tfvarenv init' first.")
-			os.Exit(1)
-		}
-		fmt.Printf("Error checking .tfvarenv.json: %v\n", err)
+	utils, err := command.NewUtils()
+	if err != nil {
+		fmt.Printf("Error initializing command utils: %v\n", err)
 		os.Exit(1)
 	}
 
+	return &cobra.Command{
+		Use:   "add",
+		Short: "Add a new environment",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := runAdd(cmd.Context(), utils); err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+}
+
+func runAdd(ctx context.Context, utils command.Utils) error {
 	reader := bufio.NewReader(os.Stdin)
 	env := &config.Environment{}
 
@@ -67,9 +75,8 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 	}
 
 	// Verify S3 bucket and versioning
-	if err := utils.CheckS3BucketVersioning(bucket); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	if err := utils.GetAWSClient().CheckBucketVersioning(ctx, bucket); err != nil {
+		return fmt.Errorf("S3 bucket verification failed: %w", err)
 	}
 
 	env.S3 = config.EnvironmentS3Config{
@@ -80,15 +87,11 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 
 	// AWS Configuration
 	fmt.Println("\nAWS Configuration:")
-
-	// Get default region from config
-	defaultRegion, err := config.GetDefaultRegion()
+	defaultRegion, err := utils.GetDefaultRegion()
 	if err != nil {
-		fmt.Printf("Error getting default region: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to get default region: %w", err)
 	}
 
-	// AWS Configuration
 	fmt.Printf("Region [%s]: ", defaultRegion)
 	region, _ := reader.ReadString('\n')
 	region = strings.TrimSpace(region)
@@ -97,10 +100,14 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 	}
 
 	// Get AWS Account ID using the specified region
-	accountID, err := utils.GetAWSAccountID(region)
+	awsClient, err := utils.GetAWSClientWithRegion(region)
 	if err != nil {
-		fmt.Printf("Error getting AWS account ID: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize AWS client: %w", err)
+	}
+
+	accountID, err := awsClient.GetAccountID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get AWS account ID: %w", err)
 	}
 
 	env.AWS = config.AWSConfig{
@@ -121,6 +128,12 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 		TFVarsPath: localPath,
 	}
 
+	// Backend Configuration
+	defaultBackendPath := filepath.Join("envs", envName, "backend.tfvars")
+	env.Backend = config.BackendConfig{
+		ConfigPath: defaultBackendPath,
+	}
+
 	// Deployment Configuration
 	fmt.Println("\nDeployment Configuration:")
 	env.Deployment = config.DeploymentConfig{
@@ -130,81 +143,95 @@ func addEnvironment(cmd *cobra.Command, args []string) {
 
 	// Setup local environment
 	fmt.Print("\nSetting up local environment")
-	if err := setupLocalEnvironment(env); err != nil {
-		fmt.Printf("Error setting up local environment: %v\n", err)
-		os.Exit(1)
+	if err := setupLocalEnvironment(utils.GetFileUtils(), env); err != nil {
+		return fmt.Errorf("failed to setup local environment: %w", err)
 	}
 	fmt.Println(": done")
 
-	// Backend Configuration
-	if err := configureBackend(envName, env); err != nil {
-		fmt.Printf("Error configuring backend: %v\n", err)
-		return
+	// Create backend configuration
+	backendData := &terraform.BackendTemplateData{
+		BucketName: bucket,
+		Region:     region,
+		Key:        fmt.Sprintf("%s/terraform.tfstate", prefix),
+	}
+	if err := terraform.CreateBackendConfig(env.Backend.ConfigPath, backendData); err != nil {
+		return fmt.Errorf("failed to create backend configuration: %w", err)
 	}
 
 	// Add environment to configuration
-	fmt.Print("\nAdding environment to .tfvarenv.json")
-	if err := config.AddEnvironment(envName, env); err != nil {
-		fmt.Printf("Error adding environment: %v\n", err)
-		os.Exit(1)
+	fmt.Print("\nAdding environment to configuration")
+	if err := utils.AddEnvironment(env); err != nil {
+		return fmt.Errorf("failed to add environment: %w", err)
 	}
 	fmt.Println(": done")
 
+	// Check file status
+	if err := checkFilesStatus(ctx, utils, env); err != nil {
+		fmt.Printf("Warning: Failed to check file status: %v\n", err)
+	} else {
+		fmt.Println("\nUse the following commands to manage tfvars:")
+		fmt.Printf("- Download: tfvarenv download %s\n", envName)
+		fmt.Printf("- Upload:   tfvarenv upload %s\n", envName)
+		fmt.Printf("- Plan:     tfvarenv plan %s\n", envName)
+		fmt.Printf("- Apply:    tfvarenv apply %s\n", envName)
+	}
+
 	fmt.Printf("\nEnvironment '%s' added successfully.\n", envName)
+	return nil
 }
 
-func setupLocalEnvironment(env *config.Environment) error {
+func setupLocalEnvironment(fileUtils file.Utils, env *config.Environment) error {
 	// Create directory structure
 	dir := filepath.Dir(env.Local.TFVarsPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := fileUtils.EnsureDirectory(dir); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Update .gitignore
-	if err := updateGitignore(); err != nil {
+	if err := updateGitignore(fileUtils); err != nil {
 		return fmt.Errorf("failed to update .gitignore: %w", err)
 	}
 
 	return nil
 }
 
-func updateGitignore() error {
+func updateGitignore(fileUtils file.Utils) error {
 	entries := []string{
 		"*.tfvars",
+		".terraform/",
+		".terraform.lock.hcl",
 	}
 
-	// まず、ファイルの内容を読み込む
-	content := []string{}
+	content, err := fileUtils.ReadFile(".gitignore")
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read .gitignore: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
 	existing := make(map[string]bool)
-
-	if file, err := os.Open(".gitignore"); err == nil {
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Text()
-			content = append(content, line)
-			existing[line] = true
-		}
-		file.Close()
+	for _, line := range lines {
+		existing[strings.TrimSpace(line)] = true
 	}
 
-	// 新しいエントリーを追加
-	needsNewline := len(content) > 0 && len(content[len(content)-1]) > 0
-	newEntries := false
+	var newContent []string
+	newContent = append(newContent, lines...)
 
+	added := false
 	for _, entry := range entries {
 		if !existing[entry] {
-			if needsNewline {
-				content = append(content, "")
-				needsNewline = false
+			if !added {
+				// Add a blank line before new entries if the file is not empty
+				if len(newContent) > 0 && newContent[len(newContent)-1] != "" {
+					newContent = append(newContent, "")
+				}
+				added = true
 			}
-			content = append(content, entry)
-			newEntries = true
+			newContent = append(newContent, entry)
 		}
 	}
 
-	// 変更がある場合のみファイルを書き直す
-	if newEntries {
-		return os.WriteFile(".gitignore", []byte(strings.Join(content, "\n")+"\n"), 0644)
+	if added {
+		return fileUtils.WriteFile(".gitignore", []byte(strings.Join(newContent, "\n")+"\n"), nil)
 	}
 
 	return nil
@@ -224,190 +251,181 @@ func promptYesNo(prompt string, defaultValue bool) bool {
 	if input == "" {
 		return defaultValue
 	}
-	return input == "y" || input == "yes" || input == "Y"
+	return input == "y" || input == "yes"
 }
 
-func checkFilesStatus(env *config.Environment) error {
-	// ローカルファイルの存在確認
-	localExists := false
-	if _, err := os.Stat(env.Local.TFVarsPath); err == nil {
-		localExists = true
+func checkFilesStatus(ctx context.Context, utils command.Utils, env *config.Environment) error {
+	// Check local file existence
+	fileUtils := utils.GetFileUtils()
+	localExists, err := fileUtils.FileExists(env.Local.TFVarsPath)
+	if err != nil {
+		return fmt.Errorf("failed to check local file: %w", err)
 	}
 
-	// リモートファイルの存在確認
-	remoteExists := false
-	var versionInfo *utils.VersionInfo
-	vInfo, err := utils.GetLatestS3Version(env.S3.Bucket, env.GetS3Path(), env.AWS.Region)
-	if err == nil {
-		remoteExists = true
-		versionInfo = vInfo
-	}
+	// Check remote file existence
+	versionManager := version.NewManager(utils.GetAWSClient(), fileUtils, env)
+	latestVersion, err := versionManager.GetLatestVersion(ctx)
+	remoteExists := err == nil && latestVersion != nil
 
 	fmt.Println("\nFile Status Check:")
 
 	switch {
 	case !localExists && !remoteExists:
-		// 両方なし: 空のファイルを作成
-		fmt.Println("No tfvars file found in either location.")
-
-		// ディレクトリの作成
-		dir := filepath.Dir(env.Local.TFVarsPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-
-		// 空のファイルを作成
-		if err := os.WriteFile(env.Local.TFVarsPath, []byte(""), 0644); err != nil {
-			return fmt.Errorf("failed to create empty tfvars file: %w", err)
-		}
-
-		fmt.Printf("Created empty tfvars file at: %s\n", env.Local.TFVarsPath)
-		fmt.Println("Action needed: Edit the tfvars file and use 'tfvarenv upload' to sync.")
-
+		return handleNoFiles(fileUtils, env)
 	case !localExists && remoteExists:
-		// リモートのみ存在: ダウンロードを提案
-		fmt.Printf("\nFound remote tfvars file:\n")
-		fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
-		fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
-		if versionInfo.Description != "" {
-			fmt.Printf("  Description: %s\n", versionInfo.Description)
-		}
-
-		if promptYesNo("\nWould you like to download it now?", true) {
-			if err := utils.DownloadTFVars(env.Name, ""); err != nil {
-				return fmt.Errorf("failed to download tfvars: %w", err)
-			}
-			fmt.Println("Successfully downloaded tfvars file.")
-		} else {
-			fmt.Println("Action needed: Use 'tfvarenv download' when ready to sync.")
-		}
-
+		return handleRemoteOnly(ctx, utils, env, latestVersion)
 	case localExists && !remoteExists:
-		// ローカルのみ存在: アップロードを提案
-		fmt.Println("Found local tfvars file but no remote file.")
+		return handleLocalOnly(ctx, utils, env)
+	default:
+		return handleBothExist(ctx, utils, env, latestVersion)
+	}
+}
 
-		if promptYesNo("Would you like to upload it now?", true) {
-			description := "Initial upload during environment setup"
-			// ファイルをアップロード（S3のバージョンIDが生成される）
-			if err := utils.UploadTFVars(env.Name, description); err != nil {
-				return fmt.Errorf("failed to upload tfvars: %w", err)
-			}
-			fmt.Println("Successfully uploaded tfvars file.")
-		} else {
-			fmt.Println("Action needed: Use 'tfvarenv upload' when ready to sync.")
+// ファイルが存在しない場合の処理
+func handleNoFiles(fileUtils file.Utils, env *config.Environment) error {
+	fmt.Println("No tfvars file found in either location.")
+
+	// Create empty file
+	opts := &file.Options{
+		CreateDirs: true,
+		Overwrite:  false,
+	}
+	if err := fileUtils.WriteFile(env.Local.TFVarsPath, []byte(""), opts); err != nil {
+		return fmt.Errorf("failed to create empty tfvars file: %w", err)
+	}
+
+	fmt.Printf("Created empty tfvars file at: %s\n", env.Local.TFVarsPath)
+	fmt.Println("Action needed: Edit the tfvars file and use 'tfvarenv upload' to sync.")
+	return nil
+}
+
+// リモートのみ存在する場合の処理
+func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Environment, ver *version.Version) error {
+	fmt.Printf("\nFound remote tfvars file:\n")
+	fmt.Printf("  Version ID: %s\n", ver.VersionID[:8])
+	fmt.Printf("  Uploaded: %s\n", ver.Timestamp.Format("2006-01-02 15:04:05"))
+	if ver.Description != "" {
+		fmt.Printf("  Description: %s\n", ver.Description)
+	}
+
+	if promptYesNo("\nWould you like to download it now?", true) {
+		downloadOpts := &aws.DownloadInput{
+			Bucket:    env.S3.Bucket,
+			Key:       env.GetS3Path(),
+			VersionID: ver.VersionID,
 		}
 
-	case localExists && remoteExists:
-		// 両方存在: ハッシュ比較
-		localHash, err := utils.CalculateFileHash(env.Local.TFVarsPath)
+		output, err := utils.GetAWSClient().DownloadFile(ctx, downloadOpts)
 		if err != nil {
-			return fmt.Errorf("failed to calculate local file hash: %w", err)
+			return fmt.Errorf("failed to download tfvars: %w", err)
 		}
 
-		if localHash == versionInfo.Hash {
-			fmt.Println("Local and remote files are in sync.")
-			fmt.Printf("\nCurrent version information:\n")
-			fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
-			fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
-			if versionInfo.Description != "" {
-				fmt.Printf("  Description: %s\n", versionInfo.Description)
-			}
-		} else {
-			fmt.Println("Warning: Local and remote files are different!")
-			fmt.Printf("\nRemote version information:\n")
-			fmt.Printf("  Version ID: %s\n", versionInfo.VersionID[:8])
-			fmt.Printf("  Uploaded: %s\n", versionInfo.Timestamp.Format("2006-01-02 15:04:05"))
-			if versionInfo.Description != "" {
-				fmt.Printf("  Description: %s\n", versionInfo.Description)
-			}
-
-			fmt.Println("\nAction needed: Use one of the following commands to sync files:")
-			fmt.Printf("  Download remote version: tfvarenv download %s\n", env.Name)
-			fmt.Printf("  Upload local changes:    tfvarenv upload %s\n", env.Name)
+		opts := &file.Options{
+			CreateDirs: true,
+			Overwrite:  false,
 		}
+		if err := utils.GetFileUtils().WriteFile(env.Local.TFVarsPath, output.Content, opts); err != nil {
+			return fmt.Errorf("failed to write tfvars file: %w", err)
+		}
+
+		fmt.Println("Successfully downloaded tfvars file.")
+	} else {
+		fmt.Println("Action needed: Use 'tfvarenv download' when ready to sync.")
+	}
+
+	return nil
+}
+
+// ローカルのみ存在する場合の処理
+func handleLocalOnly(ctx context.Context, utils command.Utils, env *config.Environment) error {
+	fmt.Println("Found local tfvars file but no remote file.")
+
+	if promptYesNo("Would you like to upload it now?", true) {
+		content, err := utils.GetFileUtils().ReadFile(env.Local.TFVarsPath)
+		if err != nil {
+			return fmt.Errorf("failed to read local file: %w", err)
+		}
+
+		uploadOpts := &aws.UploadInput{
+			Bucket:      env.S3.Bucket,
+			Key:         env.GetS3Path(),
+			Content:     content,
+			Description: "Initial upload during environment setup",
+			Metadata: map[string]string{
+				"Environment": env.Name,
+				"UploadedBy":  os.Getenv("USER"),
+			},
+		}
+
+		_, err = utils.GetAWSClient().UploadFile(ctx, uploadOpts)
+		if err != nil {
+			return fmt.Errorf("failed to upload tfvars: %w", err)
+		}
+
+		fmt.Println("Successfully uploaded tfvars file.")
+	} else {
+		fmt.Println("Action needed: Use 'tfvarenv upload' when ready to sync.")
+	}
+
+	return nil
+}
+
+// ローカルとリモートの両方が存在する場合の処理
+func handleBothExist(ctx context.Context, utils command.Utils, env *config.Environment, remoteVer *version.Version) error {
+	// Calculate local file hash
+	localHash, err := utils.GetFileUtils().CalculateHash(env.Local.TFVarsPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to calculate local file hash: %w", err)
+	}
+
+	if localHash == remoteVer.Hash {
+		fmt.Println("Local and remote files are in sync.")
+		fmt.Printf("\nCurrent version information:\n")
+		fmt.Printf("  Version ID: %s\n", remoteVer.VersionID[:8])
+		fmt.Printf("  Uploaded: %s\n", remoteVer.Timestamp.Format("2006-01-02 15:04:05"))
+		if remoteVer.Description != "" {
+			fmt.Printf("  Description: %s\n", remoteVer.Description)
+		}
+	} else {
+		fmt.Println("Warning: Local and remote files are different!")
+		fmt.Printf("\nRemote version information:\n")
+		fmt.Printf("  Version ID: %s\n", remoteVer.VersionID[:8])
+		fmt.Printf("  Uploaded: %s\n", remoteVer.Timestamp.Format("2006-01-02 15:04:05"))
+		if remoteVer.Description != "" {
+			fmt.Printf("  Description: %s\n", remoteVer.Description)
+		}
+
+		fmt.Println("\nAction needed: Use one of the following commands to sync files:")
+		fmt.Printf("  Download remote version: tfvarenv download %s\n", env.Name)
+		fmt.Printf("  Upload local changes:    tfvarenv upload %s\n", env.Name)
 	}
 
 	// Get deployment status if remote exists
-	if remoteExists {
-		deployments, err := utils.ListDeployments(env.S3.Bucket, env.GetDeploymentHistoryKey(), env.AWS.Region)
-		if err == nil && len(deployments) > 0 {
-			// Find the latest deployment for the current version
-			for _, d := range deployments {
-				if d.VersionID == versionInfo.VersionID {
-					fmt.Printf("\nDeployment Status: Last deployed on %s by %s\n",
-						d.DeployedAt.Format("2006-01-02 15:04:05"), d.DeployedBy)
-					break
-				}
-			}
+	deploymentManager := deployment.NewManager(utils.GetAWSClient(), env)
+	latestDeployment, err := deploymentManager.GetLatestDeployment(ctx)
+	if err == nil && latestDeployment != nil {
+		if latestDeployment.VersionID == remoteVer.VersionID {
+			fmt.Printf("\nDeployment Status: Last deployed on %s by %s\n",
+				latestDeployment.Timestamp.Format("2006-01-02 15:04:05"),
+				latestDeployment.DeployedBy)
 		}
 	}
 
 	return nil
 }
 
-func configureBackend(envName string, env *config.Environment) error {
-	fmt.Println("\nBackend Configuration:")
-	defaultBackendPath := filepath.Join("envs", envName, "terraform.tfbackend")
-	env.Backend = config.BackendConfig{
-		ConfigPath: defaultBackendPath,
-	}
+// テストのためにエクスポートする型を定義
+type TestExports struct {
+	HandleNoFiles    func(fileUtils file.Utils, env *config.Environment) error
+	HandleRemoteOnly func(ctx context.Context, utils command.Utils, env *config.Environment, ver *version.Version) error
+	HandleLocalOnly  func(ctx context.Context, utils command.Utils, env *config.Environment) error
+	HandleBothExist  func(ctx context.Context, utils command.Utils, env *config.Environment, remoteVer *version.Version) error
+}
 
-	// Check if backend file already exists
-	if _, err := os.Stat(defaultBackendPath); err == nil {
-		fmt.Printf("Backend configuration file already exists at: %s\n", defaultBackendPath)
-		fmt.Println("Please review and modify if needed.")
-		return nil
-	}
-
-	// Create backend directory
-	backendDir := filepath.Dir(defaultBackendPath)
-	if err := os.MkdirAll(backendDir, 0755); err != nil {
-		return fmt.Errorf("Error creating backend directory: %w", err)
-	}
-
-	fmt.Printf("Backend configuration file not found at: %s\n", defaultBackendPath)
-	fmt.Print("Would you like to create it interactively? [Y/n]: ")
-	reader := bufio.NewReader(os.Stdin)
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	if response == "" || response == "y" || response == "yes" {
-		// Interactive backend configuration
-		fmt.Print("Enter bucket name: ")
-		bucket, _ := reader.ReadString('\n')
-		bucket = strings.TrimSpace(bucket)
-
-		defaultStateKey := fmt.Sprintf("%s/terraform.tfstate", env.S3.Prefix)
-		fmt.Printf("Enter state file key [%s]: ", defaultStateKey)
-		key, _ := reader.ReadString('\n')
-		key = strings.TrimSpace(key)
-		if key == "" {
-			key = defaultStateKey
-		}
-
-		fmt.Printf("Enter region [%s]: ", env.AWS.Region)
-		region, _ := reader.ReadString('\n')
-		region = strings.TrimSpace(region)
-		if region == "" {
-			region = env.AWS.Region
-		}
-
-		// Create backend configuration file
-		content := fmt.Sprintf(`bucket = "%s"
-key    = "%s"
-region = "%s"`, bucket, key, region)
-
-		if err := os.WriteFile(defaultBackendPath, []byte(content), 0644); err != nil {
-			return fmt.Errorf("Error creating backend configuration: %w", err)
-		}
-	} else {
-		// Create empty file
-		if err := os.WriteFile(defaultBackendPath, []byte(""), 0644); err != nil {
-			return fmt.Errorf("Error creating empty backend configuration: %w", err)
-		}
-	}
-
-	fmt.Printf("\nBackend configuration created at: %s\n", defaultBackendPath)
-	fmt.Println("Please review and modify if needed before running 'tfvarenv use'")
-	return nil
+// テスト用にエクスポートする関数
+var Exports = TestExports{
+	HandleNoFiles:    handleNoFiles,
+	HandleRemoteOnly: handleRemoteOnly,
+	HandleLocalOnly:  handleLocalOnly,
+	HandleBothExist:  handleBothExist,
 }
