@@ -43,20 +43,50 @@ func NewManager(awsClient aws.Client, fileUtils file.Utils, env *config.Environm
 func (m *manager) AddVersion(ctx context.Context, version *Version) error {
 	management, err := m.getVersionManagement(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get version management: %w", err)
+		// Initialize a new version management structure
+		// Create an empty version management information for the environment
+		management = &VersionManagement{
+			FormatVersion: ManagementFormatVersion,
+			LastUpdated:   time.Now(),
+			Environment: struct {
+				Name   string `json:"name"`
+				S3Path string `json:"s3_path"`
+			}{
+				Name:   m.env.Name,
+				S3Path: m.env.GetS3Path(),
+			},
+			Versions: make([]Version, 0),
+		}
 	}
 
 	// Add new version
-	management.Versions = append(management.Versions, *version)
+	management.Versions = append([]Version{*version}, management.Versions...)
 	management.LatestVersionID = version.VersionID
 	management.LastUpdated = time.Now()
 
-	// Sort versions by timestamp (newest first)
-	sort.Slice(management.Versions, func(i, j int) bool {
-		return management.Versions[i].Timestamp.After(management.Versions[j].Timestamp)
-	})
+	// Limit the number of stored versions to 100 to prevent excessive storage
+	if len(management.Versions) > 100 {
+		management.Versions = management.Versions[:100]
+	}
 
-	return m.saveVersionManagement(ctx, management)
+	// Marshal the version management data into a JSON format with indentation for readability
+	data, err := json.MarshalIndent(management, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal version management: %w", err)
+	}
+
+	uploadInput := &aws.UploadInput{
+		Bucket:      m.env.S3.Bucket,
+		Key:         m.env.GetVersionMetadataKey(),
+		Content:     data,
+		ContentType: "application/json",
+	}
+
+	if _, err := m.awsClient.UploadFile(ctx, uploadInput); err != nil {
+		return fmt.Errorf("failed to save version management: %w", err)
+	}
+
+	return nil
 }
 
 func (m *manager) GetVersions(ctx context.Context, opts *QueryOptions) ([]Version, error) {

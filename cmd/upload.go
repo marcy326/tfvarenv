@@ -53,7 +53,6 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 
 	fileUtils := utils.GetFileUtils()
 
-	// Check if local file exists
 	exists, err := fileUtils.FileExists(env.Local.TFVarsPath)
 	if err != nil {
 		return fmt.Errorf("failed to check local file: %w", err)
@@ -62,23 +61,20 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 		return fmt.Errorf("local file not found: %s", env.Local.TFVarsPath)
 	}
 
-	// Calculate file hash and get info
 	fileInfo, err := fileUtils.GetFileInfo(env.Local.TFVarsPath)
 	if err != nil {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	// Check for duplicate content
 	versionManager := version.NewManager(utils.GetAWSClient(), fileUtils, env)
-	latestVer, err := versionManager.GetLatestVersion(ctx)
-	if err == nil && latestVer != nil && latestVer.Hash == fileInfo.Hash {
+	latestVer, _ := versionManager.GetLatestVersion(ctx)
+	if latestVer != nil && latestVer.Hash == fileInfo.Hash {
 		fmt.Println("Local file is identical to the latest version in S3. No upload needed.")
 		fmt.Printf("Latest version: %s (uploaded at %s)\n",
 			latestVer.VersionID[:8], latestVer.Timestamp.Format("2006-01-02 15:04:05"))
 		return nil
 	}
 
-	// Create backup if enabled
 	if autoBackup {
 		backupOpts := &file.BackupOptions{
 			BasePath:   filepath.Join(".backups", envName),
@@ -91,19 +87,11 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 		fmt.Printf("Created backup: %s\n", backupPath)
 	}
 
-	// Prompt for description if not provided
-	if description == "" {
-		fmt.Print("Enter version description (optional): ")
-		fmt.Scanln(&description)
-	}
-
-	// Read file content
 	content, err := fileUtils.ReadFile(env.Local.TFVarsPath)
 	if err != nil {
 		return fmt.Errorf("failed to read local file: %w", err)
 	}
 
-	// Upload to S3
 	uploadInput := &aws.UploadInput{
 		Bucket:      env.S3.Bucket,
 		Key:         env.GetS3Path(),
@@ -121,7 +109,6 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 		return fmt.Errorf("upload failed: %w", err)
 	}
 
-	// Create version record
 	newVersion := &version.Version{
 		VersionID:   uploadOutput.VersionID,
 		Hash:        fileInfo.Hash,
@@ -131,9 +118,11 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 		Size:        fileInfo.Size,
 	}
 
-	// Add version to management
 	if err := versionManager.AddVersion(ctx, newVersion); err != nil {
-		return fmt.Errorf("failed to record version: %w", err)
+		fmt.Printf("Warning: Failed to record version information: %v\n", err)
+		fmt.Println("The file was uploaded successfully, but version tracking may be incomplete.")
+		fmt.Printf("Please run 'tfvarenv upload %s' again to ensure proper version tracking.\n", envName)
+		return nil
 	}
 
 	fmt.Printf("\nSuccessfully uploaded %s to %s\n", env.Local.TFVarsPath, env.GetFullS3Path())
@@ -144,11 +133,6 @@ func runUpload(ctx context.Context, utils command.Utils, envName, description st
 	if newVersion.Description != "" {
 		fmt.Printf("  Description: %s\n", newVersion.Description)
 	}
-
-	// Show deployment guidance
-	fmt.Printf("\nTo deploy this version:\n")
-	fmt.Printf("  Plan:   tfvarenv plan %s --remote --version-id %s\n", envName, newVersion.VersionID)
-	fmt.Printf("  Apply:  tfvarenv apply %s --remote --version-id %s\n", envName, newVersion.VersionID)
 
 	return nil
 }
