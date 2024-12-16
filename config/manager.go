@@ -18,6 +18,7 @@ const (
 type Manager interface {
 	GetEnvironment(name string) (*Environment, error)
 	AddEnvironment(name string, env *Environment) error
+	RemoveEnvironment(name string) error
 	ListEnvironments() ([]string, error)
 	GetDefaultRegion() (string, error)
 	Save() error
@@ -106,7 +107,20 @@ func (m *manager) AddEnvironment(name string, env *Environment) error {
 	}
 
 	m.config.Environments[name] = *env
-	return m.save() // Save()をprivateのsave()に変更
+	return m.save()
+}
+
+// RemoveEnvironment implements environment removal
+func (m *manager) RemoveEnvironment(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.config.Environments[name]; !exists {
+		return fmt.Errorf("environment '%s' does not exist", name)
+	}
+
+	delete(m.config.Environments, name)
+	return m.Save()
 }
 
 func (m *manager) ListEnvironments() ([]string, error) {
