@@ -13,12 +13,29 @@ import (
 
 const HistoryFormatVersion = "1.0"
 
+const (
+	StatusSuccess = "success"
+	StatusFailure = "failure"
+)
+
+const (
+	StatusActive    = "active"
+	StatusDestroyed = "destroyed"
+)
+
+const (
+	CommandApply   = "apply"
+	CommandPlan    = "plan"
+	CommandDestroy = "destroy"
+)
+
 type Manager interface {
 	AddRecord(ctx context.Context, record *Record) error
 	GetHistory(ctx context.Context) (*History, error)
 	GetLatestDeployment(ctx context.Context) (*Record, error)
 	GetStats(ctx context.Context) (*Stats, error)
 	QueryDeployments(ctx context.Context, options QueryOptions) ([]Record, error)
+	MarkAsDestroyed(ctx context.Context) error
 }
 
 type manager struct {
@@ -41,7 +58,12 @@ func (m *manager) AddRecord(ctx context.Context, record *Record) error {
 
 	// Add new record
 	history.Deployments = append(history.Deployments, *record)
-	history.LatestDeployment = record
+
+	history.LatestDeployment = &LatestInfo{
+		Deployment:   record,
+		Status:       StatusActive,
+		ModifiedTime: time.Now(),
+	}
 
 	// Sort deployments by timestamp (newest first)
 	sort.Slice(history.Deployments, func(i, j int) bool {
@@ -49,6 +71,26 @@ func (m *manager) AddRecord(ctx context.Context, record *Record) error {
 	})
 
 	// Save updated history
+	if err := m.saveHistory(ctx, history); err != nil {
+		return fmt.Errorf("failed to save deployment history: %w", err)
+	}
+
+	return nil
+}
+
+// MarkAsDestroyed は環境の状態をdestroyedに設定
+func (m *manager) MarkAsDestroyed(ctx context.Context) error {
+	history, err := m.GetHistory(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get deployment history: %w", err)
+	}
+
+	if history.LatestDeployment == nil {
+		history.LatestDeployment = &LatestInfo{}
+	}
+	history.LatestDeployment.Status = StatusDestroyed
+	history.LatestDeployment.ModifiedTime = time.Now()
+
 	if err := m.saveHistory(ctx, history); err != nil {
 		return fmt.Errorf("failed to save deployment history: %w", err)
 	}
@@ -86,8 +128,8 @@ func (m *manager) GetLatestDeployment(ctx context.Context) (*Record, error) {
 		return nil, fmt.Errorf("failed to get deployment history: %w", err)
 	}
 
-	if history.LatestDeployment != nil {
-		return history.LatestDeployment, nil
+	if history.LatestDeployment != nil && history.LatestDeployment.Deployment != nil {
+		return history.LatestDeployment.Deployment, nil
 	}
 
 	if len(history.Deployments) > 0 {
@@ -111,7 +153,7 @@ func (m *manager) GetStats(ctx context.Context) (*Stats, error) {
 
 	var totalDuration time.Duration
 	for _, d := range history.Deployments {
-		if d.Status == "success" {
+		if d.Status == StatusSuccess {
 			stats.SuccessfulCount++
 		} else {
 			stats.FailedCount++

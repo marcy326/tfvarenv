@@ -19,10 +19,17 @@ type Record struct {
 
 // History represents the deployment history file structure
 type History struct {
-	FormatVersion    string   `json:"format_version"`
-	Environment      string   `json:"environment"`
-	LatestDeployment *Record  `json:"latest_deployment,omitempty"`
-	Deployments      []Record `json:"deployments"`
+	FormatVersion    string      `json:"format_version"`
+	Environment      string      `json:"environment"`
+	LatestDeployment *LatestInfo `json:"latest_deployment,omitempty"`
+	Deployments      []Record    `json:"deployments"`
+}
+
+// LatestInfo represents the most recent deployment information
+type LatestInfo struct {
+	Deployment   *Record   `json:"deployment,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	ModifiedTime time.Time `json:"modified_time"`
 }
 
 // QueryOptions represents options for querying deployments
