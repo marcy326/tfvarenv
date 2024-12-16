@@ -34,6 +34,10 @@ func NewApplyCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			if !opts.Remote && opts.VarFile == "" {
+				opts.VarFile = opts.Environment.Local.TFVarsPath
+			}
+
 			if err := runApply(cmd.Context(), utils, &opts); err != nil {
 				fmt.Printf("Error: %v\n", err)
 				os.Exit(1)
@@ -77,6 +81,22 @@ func runApply(ctx context.Context, utils command.Utils, opts *terraform.ApplyOpt
 		}
 
 		opts.VersionID = ver.VersionID
+	} else {
+		// ローカルファイルのパスを自動設定
+		if opts.VarFile == "" { // --var-fileで明示的に指定されていない場合
+			opts.VarFile = opts.Environment.Local.TFVarsPath
+
+			// ファイルの存在確認
+			exists, err := utils.GetFileUtils().FileExists(opts.VarFile)
+			if err != nil {
+				return fmt.Errorf("failed to check tfvars file: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("tfvars file not found at: %s", opts.VarFile)
+			}
+
+			fmt.Printf("Using local tfvars file: %s\n", opts.VarFile)
+		}
 	}
 
 	// Get deployment approval if required

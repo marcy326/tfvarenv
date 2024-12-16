@@ -100,6 +100,22 @@ func runPlan(ctx context.Context, utils command.Utils, opts *terraform.PlanOptio
 
 		fmt.Println() // Add empty line for readability
 		opts.VersionID = ver.VersionID
+	} else {
+		// ローカルファイルのパスを自動設定
+		if opts.VarFile == "" { // --var-fileで明示的に指定されていない場合
+			opts.VarFile = opts.Environment.Local.TFVarsPath
+
+			// ファイルの存在確認
+			exists, err := utils.GetFileUtils().FileExists(opts.VarFile)
+			if err != nil {
+				return fmt.Errorf("failed to check tfvars file: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("tfvars file not found at: %s", opts.VarFile)
+			}
+
+			fmt.Printf("Using local tfvars file: %s\n", opts.VarFile)
+		}
 	}
 
 	// Run terraform plan

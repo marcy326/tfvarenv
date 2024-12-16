@@ -1,6 +1,6 @@
 .tfvarenv
 dist/
-dev/
+/dev/
 /tfvarenv
 /.tfvarenv.json
 .tmp/
@@ -9,3 +9,5 @@ dev/
 # tfvarenv
 .terraform/
 .backups/
+.terraform.lock.hcl
+
