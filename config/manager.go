@@ -19,6 +19,7 @@ type Manager interface {
 	GetEnvironment(name string) (*Environment, error)
 	AddEnvironment(name string, env *Environment) error
 	RemoveEnvironment(name string) error
+	UpdateEnvironment(name string, env *Environment) error
 	ListEnvironments() ([]string, error)
 	GetDefaultRegion() (string, error)
 	Save() error
@@ -100,7 +101,7 @@ func (m *manager) AddEnvironment(name string, env *Environment) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock() // deferを使用してロックの解放を保証
+	defer m.mu.Unlock()
 
 	if _, exists := m.config.Environments[name]; exists {
 		return fmt.Errorf("environment '%s' already exists", name)
@@ -120,7 +121,24 @@ func (m *manager) RemoveEnvironment(name string) error {
 	}
 
 	delete(m.config.Environments, name)
-	return m.Save()
+	return m.save()
+}
+
+// UpdateEnvironment implements environment update
+func (m *manager) UpdateEnvironment(name string, env *Environment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.config.Environments[name]; !exists {
+		return fmt.Errorf("environment '%s' does not exist", name)
+	}
+
+	if err := validateEnvironment(env); err != nil {
+		return fmt.Errorf("invalid environment configuration: %w", err)
+	}
+
+	m.config.Environments[name] = *env
+	return m.save()
 }
 
 func (m *manager) ListEnvironments() ([]string, error) {

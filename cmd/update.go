@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tfvarenv/config"
 	"tfvarenv/utils/command"
 )
 
@@ -59,6 +60,13 @@ func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
 	// Update fields
 	fmt.Print("\nEnter new values (press Enter to keep current value)\n")
 
+	// Environment Name
+	var newEnvName string
+	fmt.Printf("Environment Name [%s]: ", envName)
+	if name, _ := reader.ReadString('\n'); strings.TrimSpace(name) != "" {
+		newEnvName = strings.TrimSpace(name)
+	}
+
 	// Description
 	fmt.Printf("Description [%s]: ", env.Description)
 	if desc, _ := reader.ReadString('\n'); strings.TrimSpace(desc) != "" {
@@ -108,10 +116,38 @@ func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
 	env.Deployment.RequireApproval = promptYesNo("Require deployment approval?", env.Deployment.RequireApproval)
 
 	// Update configuration
-	if err := utils.AddEnvironment(env); err != nil {
-		return fmt.Errorf("failed to update environment: %w", err)
+	if newEnvName != "" && newEnvName != envName {
+		// Updating with new environment name
+		env.Name = newEnvName // Update the name in the environment struct
+
+		// First remove the old environment, then add the new one
+		cfg, err := config.NewManager()
+		if err != nil {
+			return fmt.Errorf("failed to initialize config manager: %w", err)
+		}
+
+		if err := cfg.RemoveEnvironment(envName); err != nil {
+			return fmt.Errorf("failed to remove old environment: %w", err)
+		}
+
+		if err := cfg.AddEnvironment(newEnvName, env); err != nil {
+			return fmt.Errorf("failed to add updated environment: %w", err)
+		}
+
+		fmt.Printf("\nEnvironment renamed from '%s' to '%s' and updated successfully.\n", envName, newEnvName)
+	} else {
+		// Update existing environment
+		cfg, err := config.NewManager()
+		if err != nil {
+			return fmt.Errorf("failed to initialize config manager: %w", err)
+		}
+
+		if err := cfg.UpdateEnvironment(envName, env); err != nil {
+			return fmt.Errorf("failed to update environment: %w", err)
+		}
+
+		fmt.Printf("\nEnvironment '%s' updated successfully.\n", envName)
 	}
 
-	fmt.Printf("\nEnvironment '%s' updated successfully.\n", envName)
 	return nil
 }
