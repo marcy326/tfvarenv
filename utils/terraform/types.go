@@ -56,3 +56,12 @@ type BackendConfig struct {
 	Type   string
 	Config map[string]interface{}
 }
+
+// DestroyOptions represents options for terraform destroy
+type DestroyOptions struct {
+	Environment *config.Environment
+	VarFile     string
+	AutoApprove bool
+	NoColor     bool
+	Options     []string
+}

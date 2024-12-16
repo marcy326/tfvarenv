@@ -44,6 +44,7 @@ It provides version control for tfvars files and helps manage multiple environme
 	rootCmd.AddCommand(NewUseCmd())
 	rootCmd.AddCommand(NewVersionCmd())
 	rootCmd.AddCommand(NewVersionsCmd())
+	rootCmd.AddCommand(NewDestroyCmd())
 
 	return rootCmd
 }

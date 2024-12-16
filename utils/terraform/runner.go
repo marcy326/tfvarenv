@@ -19,6 +19,7 @@ type Runner interface {
 	Init(ctx context.Context, opts *InitOptions) (*ExecutionResult, error)
 	Plan(ctx context.Context, opts *PlanOptions) (*ExecutionResult, error)
 	Apply(ctx context.Context, opts *ApplyOptions) (*ExecutionResult, error)
+	Destroy(ctx context.Context, opts *DestroyOptions) (*ExecutionResult, error)
 	Validate(ctx context.Context) (*ValidationResult, error)
 }
 
@@ -182,6 +183,25 @@ func (r *runner) Validate(ctx context.Context) (*ValidationResult, error) {
 	}
 
 	return validation, nil
+}
+
+func (r *runner) Destroy(ctx context.Context, opts *DestroyOptions) (*ExecutionResult, error) {
+	args := []string{"destroy"}
+
+	if opts.VarFile != "" {
+		args = append(args, "-var-file="+opts.VarFile)
+	}
+	if opts.AutoApprove {
+		args = append(args, "-auto-approve")
+	}
+	if opts.NoColor {
+		args = append(args, "-no-color")
+	}
+	if len(opts.Options) > 0 {
+		args = append(args, opts.Options...)
+	}
+
+	return r.runCommand(ctx, args)
 }
 
 func (r *runner) runCommand(ctx context.Context, args []string) (*ExecutionResult, error) {
