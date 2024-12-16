@@ -78,6 +78,17 @@ func runHistory(ctx context.Context, utils command.Utils, env *config.Environmen
 		return nil
 	}
 
+	if history.LatestDeployment != nil {
+		fmt.Printf("  Current Status: %s (last modified: %s)\n",
+			history.LatestDeployment.Status,
+			history.LatestDeployment.ModifiedTime.Format("2006-01-02 15:04:05"))
+		if history.LatestDeployment.Deployment != nil {
+			fmt.Printf("  Latest Version: %s\n",
+				history.LatestDeployment.Deployment.VersionID[:8])
+		}
+	}
+	fmt.Println()
+
 	// Get version information for additional context
 	versionManager := version.NewManager(utils.GetAWSClient(), utils.GetFileUtils(), env)
 	versionMap := make(map[string]*version.Version)
@@ -95,7 +106,14 @@ func runHistory(ctx context.Context, utils command.Utils, env *config.Environmen
 	}
 
 	for _, deploy := range deployments {
-		fmt.Printf("\n%s\n", deploy.Timestamp.Format("2006-01-02 15:04:05"))
+		latestMark := ""
+		if history.LatestDeployment != nil &&
+			history.LatestDeployment.Deployment != nil &&
+			history.LatestDeployment.Deployment.Timestamp.Equal(deploy.Timestamp) {
+			latestMark = " (Latest)"
+		}
+
+		fmt.Printf("\n%s%s\n", deploy.Timestamp.Format("2006-01-02 15:04:05"), latestMark)
 		fmt.Printf("  Command: terraform %s\n", deploy.Command)
 		fmt.Printf("  Version: %s\n", deploy.VersionID[:8])
 		fmt.Printf("  By: %s\n", deploy.DeployedBy)
