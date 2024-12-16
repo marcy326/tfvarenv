@@ -22,8 +22,9 @@ func NewHistoryCmd() *cobra.Command {
 	}
 
 	var (
-		limit int
-		since string
+		limit   int
+		showAll bool
+		since   string
 	)
 
 	historyCmd := &cobra.Command{
@@ -47,6 +48,12 @@ func NewHistoryCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			if showAll {
+				limit = 0
+			} else if limit <= 0 {
+				limit = 5
+			}
+
 			opts := &deployment.QueryOptions{
 				Since: sinceTime,
 				Limit: limit,
@@ -59,7 +66,8 @@ func NewHistoryCmd() *cobra.Command {
 		},
 	}
 
-	historyCmd.Flags().IntVar(&limit, "limit", 0, "Limit the number of entries")
+	historyCmd.Flags().IntVar(&limit, "limit", 5, "Limit the number of entries (default: 5, 0: unlimited)")
+	historyCmd.Flags().BoolVar(&showAll, "all", false, "Show all entries")
 	historyCmd.Flags().StringVar(&since, "since", "", "Show entries since date (YYYY-MM-DD)")
 
 	return historyCmd
@@ -103,6 +111,17 @@ func runHistory(ctx context.Context, utils command.Utils, env *config.Environmen
 	deployments, err := deploymentManager.QueryDeployments(ctx, *opts)
 	if err != nil {
 		return fmt.Errorf("failed to query deployments: %w", err)
+	}
+
+	fmt.Printf("Deployment history")
+	if opts.Limit > 0 {
+		fmt.Printf(" (showing last %d entries)", opts.Limit)
+	}
+	fmt.Println(":")
+
+	if len(deployments) == 0 {
+		fmt.Println("No deployment history found")
+		return nil
 	}
 
 	for _, deploy := range deployments {
