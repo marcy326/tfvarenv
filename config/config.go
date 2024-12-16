@@ -66,5 +66,5 @@ func (e *Environment) GetVersionMetadataKey() string {
 
 // GetDeploymentHistoryKey returns the S3 key for deployment history
 func (e *Environment) GetDeploymentHistoryKey() string {
-	return fmt.Sprintf("%s/.deployments.json", e.S3.Prefix)
+	return fmt.Sprintf("%s/.%s.deployments.json", e.S3.Prefix, e.Name)
 }
