@@ -11,6 +11,7 @@ import (
 	"tfvarenv/config"
 	"tfvarenv/utils/command"
 	"tfvarenv/utils/file"
+	"tfvarenv/utils/prompt"
 )
 
 func NewRemoveCmd() *cobra.Command {
@@ -57,7 +58,7 @@ func runRemove(ctx context.Context, utils command.Utils, envName string, force b
 
 	// Confirm removal
 	if !force {
-		if !promptYesNo(fmt.Sprintf("\nAre you sure you want to remove environment '%s'?", envName), false) {
+		if !prompt.PromptYesNo(fmt.Sprintf("\nAre you sure you want to remove environment '%s'?", envName), false) {
 			return fmt.Errorf("removal cancelled by user")
 		}
 	}

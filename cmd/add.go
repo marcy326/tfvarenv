@@ -14,7 +14,7 @@ import (
 	"tfvarenv/utils/aws"
 	"tfvarenv/utils/command"
 	"tfvarenv/utils/file"
-	"tfvarenv/utils/terraform"
+	"tfvarenv/utils/prompt"
 )
 
 func NewAddCmd() *cobra.Command {
@@ -126,21 +126,11 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 		TFVarsPath: localPath,
 	}
 
-	// Backend Configuration
-	defaultBackendKey := strings.TrimSuffix(tfvarsKey, ".tfvars") + ".tfbackend"
-	defaultBackendPath := filepath.Join("envs", envName, defaultBackendKey)
-	fmt.Printf("\nBackend Configuration:\nEnter backend config path [%s]: ", defaultBackendPath)
-	backendPath, _ := reader.ReadString('\n')
-	backendPath = strings.TrimSpace(backendPath)
-	if backendPath == "" {
-		backendPath = defaultBackendPath
-	}
-
 	// Deployment Configuration
 	fmt.Println("\nDeployment Configuration:")
 	env.Deployment = config.DeploymentConfig{
-		AutoBackup:      promptYesNo("Enable auto backup?", true),
-		RequireApproval: promptYesNo("Require deployment approval?", envName != "dev"),
+		AutoBackup:      prompt.PromptYesNo("Enable auto backup?", true),
+		RequireApproval: prompt.PromptYesNo("Require deployment approval?", envName != "dev"),
 	}
 
 	// Setup local environment
@@ -150,22 +140,37 @@ func runAdd(ctx context.Context, utils command.Utils) error {
 	}
 	fmt.Println(": done")
 
-	// Create backend configuration
-	if exists, _ := utils.GetFileUtils().FileExists(backendPath); exists {
-		fmt.Printf("Backend configuration file already exists at %s, keeping existing configuration\n", backendPath)
-	} else {
-		backendData := &terraform.BackendTemplateData{
-			BucketName: bucket,
-			Region:     region,
-			Key:        fmt.Sprintf("%s/terraform.tfstate", prefix),
-		}
-		if err := terraform.CreateBackendConfig(env.Backend.ConfigPath, backendData); err != nil {
-			return fmt.Errorf("failed to create backend configuration: %w", err)
-		}
-		fmt.Printf("Created backend configuration at %s\n", backendPath)
+	// Backend Configuration
+	fmt.Println("\nBackend Configuration:")
+
+	defaultBackendBucket := env.S3.Bucket
+	fmt.Printf("Enter backend bucket name [%s]: ", defaultBackendBucket)
+	backendBucket, _ := reader.ReadString('\n')
+	backendBucket = strings.TrimSpace(backendBucket)
+	if backendBucket == "" {
+		backendBucket = defaultBackendBucket
 	}
+
+	defaultBackendKey := filepath.Join(env.S3.Prefix, "terraform.tfstate")
+	fmt.Printf("Enter backend key [%s]: ", defaultBackendKey)
+	backendKey, _ := reader.ReadString('\n')
+	backendKey = strings.TrimSpace(backendKey)
+	if backendKey == "" {
+		backendKey = defaultBackendKey
+	}
+
+	defaultBackendRegion := env.AWS.Region
+	fmt.Printf("Enter backend region [%s]: ", defaultBackendRegion)
+	backendRegion, _ := reader.ReadString('\n')
+	backendRegion = strings.TrimSpace(backendRegion)
+	if backendRegion == "" {
+		backendRegion = defaultBackendRegion
+	}
+
 	env.Backend = config.BackendConfig{
-		ConfigPath: backendPath,
+		Bucket: backendBucket,
+		Key:    backendKey,
+		Region: backendRegion,
 	}
 
 	// Add environment to configuration
@@ -217,23 +222,6 @@ func setupLocalEnvironment(fileUtils file.Utils, env *config.Environment) error 
 	}
 
 	return nil
-}
-
-func promptYesNo(prompt string, defaultValue bool) bool {
-	defaultStr := "Y/n"
-	if !defaultValue {
-		defaultStr = "y/N"
-	}
-	fmt.Printf("%s [%s]: ", prompt, defaultStr)
-
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.ToLower(strings.TrimSpace(input))
-
-	if input == "" {
-		return defaultValue
-	}
-	return input == "y" || input == "yes"
 }
 
 func checkFilesStatus(ctx context.Context, utils command.Utils, env *config.Environment) error {
@@ -288,7 +276,7 @@ func handleNoFiles(fileUtils file.Utils, env *config.Environment) error {
 func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Environment) error {
 	fmt.Println("Found remote tfvars file but no local file")
 
-	if promptYesNo("\nWould you like to download it now?", true) {
+	if prompt.PromptYesNo("\nWould you like to download it now?", true) {
 		downloadInput := &aws.DownloadInput{
 			Bucket: env.S3.Bucket,
 			Key:    env.GetS3Path(),
@@ -319,7 +307,7 @@ func handleRemoteOnly(ctx context.Context, utils command.Utils, env *config.Envi
 func handleLocalOnly(ctx context.Context, utils command.Utils, env *config.Environment) error {
 	fmt.Println("Found local tfvars file but no remote file.")
 
-	if promptYesNo("Would you like to upload it now?", true) {
+	if prompt.PromptYesNo("Would you like to upload it now?", true) {
 		content, err := utils.GetFileUtils().ReadFile(env.Local.TFVarsPath)
 		if err != nil {
 			return fmt.Errorf("failed to read local file: %w", err)

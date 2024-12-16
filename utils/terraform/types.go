@@ -6,11 +6,12 @@ import (
 
 // InitOptions represents options for terraform init
 type InitOptions struct {
-	BackendConfig string
-	Reconfigure   bool
-	ForceCopy     bool
-	NoColor       bool
-	Options       []string
+	BackendConfig  string
+	BackendConfigs map[string]string
+	Reconfigure    bool
+	ForceCopy      bool
+	NoColor        bool
+	Options        []string
 }
 
 // PlanOptions represents options for terraform plan

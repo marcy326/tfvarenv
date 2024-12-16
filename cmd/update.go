@@ -11,6 +11,7 @@ import (
 
 	"tfvarenv/config"
 	"tfvarenv/utils/command"
+	"tfvarenv/utils/prompt"
 )
 
 func NewUpdateCmd() *cobra.Command {
@@ -22,7 +23,8 @@ func NewUpdateCmd() *cobra.Command {
 
 	updateCmd := &cobra.Command{
 		Use:   "update [environment]",
-		Short: "Update environment configuration",
+		Short: "Update an existing environment",
+		Long:  `Update an existing environment in tfvarenv.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := runUpdate(cmd.Context(), utils, args[0]); err != nil {
@@ -36,26 +38,28 @@ func NewUpdateCmd() *cobra.Command {
 }
 
 func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
-	// Get current environment configuration
+	reader := bufio.NewReader(os.Stdin)
+
 	env, err := utils.GetEnvironment(envName)
 	if err != nil {
-		return fmt.Errorf("environment not found: %w", err)
+		return fmt.Errorf("failed to get environment info: %w", err)
 	}
-
-	reader := bufio.NewReader(os.Stdin)
 
 	// Show current configuration
 	fmt.Printf("\nCurrent configuration for environment '%s':\n", envName)
 	if env.Description != "" {
-		fmt.Printf("Description: %s\n", env.Description)
+		fmt.Printf("  Description: %s\n", env.Description)
 	}
-	fmt.Printf("AWS Account: %s\n", env.AWS.AccountID)
-	fmt.Printf("Region: %s\n", env.AWS.Region)
-	fmt.Printf("S3 Bucket: %s\n", env.S3.Bucket)
-	fmt.Printf("S3 Prefix: %s\n", env.S3.Prefix)
-	fmt.Printf("Local Path: %s\n", env.Local.TFVarsPath)
-	fmt.Printf("Auto Backup: %v\n", env.Deployment.AutoBackup)
-	fmt.Printf("Require Approval: %v\n", env.Deployment.RequireApproval)
+	fmt.Printf("  AWS Account: %s\n", env.AWS.AccountID)
+	fmt.Printf("  Region: %s\n", env.AWS.Region)
+	fmt.Printf("  S3 Bucket: %s\n", env.S3.Bucket)
+	fmt.Printf("  S3 Prefix: %s\n", env.S3.Prefix)
+	fmt.Printf("  Local Path: %s\n", env.Local.TFVarsPath)
+	fmt.Printf("  Auto Backup: %v\n", env.Deployment.AutoBackup)
+	fmt.Printf("  Require Approval: %v\n", env.Deployment.RequireApproval)
+	fmt.Printf("  Backend Bucket: %s\n", env.Backend.Bucket)
+	fmt.Printf("  Backend Key: %s\n", env.Backend.Key)
+	fmt.Printf("  Backend Region: %s\n", env.Backend.Region)
 
 	// Update fields
 	fmt.Print("\nEnter new values (press Enter to keep current value)\n")
@@ -73,36 +77,34 @@ func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
 		env.Description = strings.TrimSpace(desc)
 	}
 
+	// AWS Account ID
+	fmt.Printf("AWS Account ID [%s]: ", env.AWS.AccountID)
+	if accountID, _ := reader.ReadString('\n'); strings.TrimSpace(accountID) != "" {
+		env.AWS.AccountID = strings.TrimSpace(accountID)
+	}
+
 	// AWS Region
 	fmt.Printf("AWS Region [%s]: ", env.AWS.Region)
 	if region, _ := reader.ReadString('\n'); strings.TrimSpace(region) != "" {
-		region = strings.TrimSpace(region)
-		// Update AWS client and verify account
-		awsClient, err := utils.GetAWSClientWithRegion(region)
-		if err != nil {
-			return fmt.Errorf("failed to initialize AWS client: %w", err)
-		}
-		accountID, err := awsClient.GetAccountID(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get AWS account ID: %w", err)
-		}
-		env.AWS.Region = region
-		env.AWS.AccountID = accountID
+		env.AWS.Region = strings.TrimSpace(region)
 	}
 
-	// S3 Configuration
-	fmt.Printf("S3 Bucket [%s]: ", env.S3.Bucket)
+	// S3 Bucket
+	fmt.Printf("S3 bucket name [%s]: ", env.S3.Bucket)
 	if bucket, _ := reader.ReadString('\n'); strings.TrimSpace(bucket) != "" {
-		bucket = strings.TrimSpace(bucket)
-		if err := utils.GetAWSClient().CheckBucketVersioning(ctx, bucket); err != nil {
-			return fmt.Errorf("S3 bucket verification failed: %w", err)
-		}
-		env.S3.Bucket = bucket
+		env.S3.Bucket = strings.TrimSpace(bucket)
 	}
 
-	fmt.Printf("S3 Prefix [%s]: ", env.S3.Prefix)
+	// S3 Prefix
+	fmt.Printf("S3 prefix [%s]: ", env.S3.Prefix)
 	if prefix, _ := reader.ReadString('\n'); strings.TrimSpace(prefix) != "" {
 		env.S3.Prefix = strings.TrimSpace(prefix)
+	}
+
+	// TFVars Key
+	fmt.Printf("tfvars file name [%s]: ", env.S3.TFVarsKey)
+	if tfvarsKey, _ := reader.ReadString('\n'); strings.TrimSpace(tfvarsKey) != "" {
+		env.S3.TFVarsKey = strings.TrimSpace(tfvarsKey)
 	}
 
 	// Local Configuration
@@ -112,8 +114,24 @@ func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
 	}
 
 	// Deployment Configuration
-	env.Deployment.AutoBackup = promptYesNo("Enable auto backup?", env.Deployment.AutoBackup)
-	env.Deployment.RequireApproval = promptYesNo("Require deployment approval?", env.Deployment.RequireApproval)
+	env.Deployment.AutoBackup = prompt.PromptYesNo("Enable auto backup?", env.Deployment.AutoBackup)
+	env.Deployment.RequireApproval = prompt.PromptYesNo("Require deployment approval?", env.Deployment.RequireApproval)
+
+	// Backend Configuration
+	fmt.Printf("Backend bucket name [%s]: ", env.Backend.Bucket)
+	if backendBucket, _ := reader.ReadString('\n'); strings.TrimSpace(backendBucket) != "" {
+		env.Backend.Bucket = strings.TrimSpace(backendBucket)
+	}
+
+	fmt.Printf("Backend key [%s]: ", env.Backend.Key)
+	if backendKey, _ := reader.ReadString('\n'); strings.TrimSpace(backendKey) != "" {
+		env.Backend.Key = strings.TrimSpace(backendKey)
+	}
+
+	fmt.Printf("Backend region [%s]: ", env.Backend.Region)
+	if backendRegion, _ := reader.ReadString('\n'); strings.TrimSpace(backendRegion) != "" {
+		env.Backend.Region = strings.TrimSpace(backendRegion)
+	}
 
 	// Update configuration
 	if newEnvName != "" && newEnvName != envName {
@@ -133,21 +151,28 @@ func runUpdate(ctx context.Context, utils command.Utils, envName string) error {
 		if err := cfg.AddEnvironment(newEnvName, env); err != nil {
 			return fmt.Errorf("failed to add updated environment: %w", err)
 		}
-
-		fmt.Printf("\nEnvironment renamed from '%s' to '%s' and updated successfully.\n", envName, newEnvName)
 	} else {
-		// Update existing environment
+		// Updating existing environment
 		cfg, err := config.NewManager()
 		if err != nil {
 			return fmt.Errorf("failed to initialize config manager: %w", err)
 		}
-
 		if err := cfg.UpdateEnvironment(envName, env); err != nil {
 			return fmt.Errorf("failed to update environment: %w", err)
 		}
-
-		fmt.Printf("\nEnvironment '%s' updated successfully.\n", envName)
 	}
+
+	fmt.Println("\nEnvironment updated successfully!")
+
+	fmt.Printf("\nFile locations:\n")
+	fmt.Printf("  Local: %s\n", env.Local.TFVarsPath)
+	fmt.Printf("  Remote: %s\n", env.GetFullS3Path())
+
+	fmt.Println("\nUse the following commands to manage tfvars:")
+	fmt.Printf("- Download: tfvarenv download %s\n", env.Name)
+	fmt.Printf("- Upload:   tfvarenv upload %s\n", env.Name)
+	fmt.Printf("- Plan:     tfvarenv plan %s\n", env.Name)
+	fmt.Printf("- Apply:    tfvarenv apply %s\n", env.Name)
 
 	return nil
 }

@@ -5,6 +5,7 @@ dist/
 /.tfvarenv.json
 .tmp/
 *.tfvars
+/envs/
 
 # tfvarenv
 .terraform/

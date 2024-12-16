@@ -1,12 +1,12 @@
 package main
 
 import (
-    "tfvarenv/cmd"
+	"tfvarenv/cmd"
 )
 
 func main() {
-    rootCmd := cmd.NewRootCmd()
-    if err := rootCmd.Execute(); err != nil {
-        panic(err)
-    }
+	rootCmd := cmd.NewRootCmd()
+	if err := rootCmd.Execute(); err != nil {
+		panic(err)
+	}
 }

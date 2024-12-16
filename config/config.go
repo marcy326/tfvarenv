@@ -46,7 +46,9 @@ type DeploymentConfig struct {
 
 // BackendConfig構造体の定義
 type BackendConfig struct {
-	ConfigPath string `json:"config_path"`
+	Bucket string `json:"bucket"`
+	Key    string `json:"key"`
+	Region string `json:"region"`
 }
 
 // GetS3Path returns the full path for the tfvars file (without s3:// prefix)

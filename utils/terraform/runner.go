@@ -40,8 +40,8 @@ func NewRunner(awsClient aws.Client, fileUtils file.Utils) Runner {
 func (r *runner) Init(ctx context.Context, opts *InitOptions) (*ExecutionResult, error) {
 	args := []string{"init"}
 
-	if opts.BackendConfig != "" {
-		args = append(args, "-backend-config="+opts.BackendConfig)
+	for key, value := range opts.BackendConfigs {
+		args = append(args, fmt.Sprintf("-backend-config=%s=%s", key, value))
 	}
 	if opts.Reconfigure {
 		args = append(args, "-reconfigure")

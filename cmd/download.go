@@ -12,6 +12,7 @@ import (
 	"tfvarenv/utils/command"
 	"tfvarenv/utils/deployment"
 	"tfvarenv/utils/file"
+	"tfvarenv/utils/prompt"
 	"tfvarenv/utils/version"
 )
 
@@ -103,7 +104,7 @@ func runDownload(ctx context.Context, utils command.Utils, envName, versionID st
 
 		if !force {
 			fmt.Printf("\nLocal file %s already exists.\n", env.Local.TFVarsPath)
-			if !promptYesNo("Do you want to overwrite it?", false) {
+			if !prompt.PromptYesNo("Do you want to overwrite it?", false) {
 				return fmt.Errorf("download cancelled by user")
 			}
 		}
