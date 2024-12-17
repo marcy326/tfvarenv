@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,7 @@ import (
 	"tfvarenv/utils/command"
 	"tfvarenv/utils/file"
 	"tfvarenv/utils/prompt"
+	"tfvarenv/utils/version"
 )
 
 func NewAddCmd() *cobra.Command {
@@ -308,9 +310,15 @@ func handleLocalOnly(ctx context.Context, utils command.Utils, env *config.Envir
 	fmt.Println("Found local tfvars file but no remote file.")
 
 	if prompt.PromptYesNo("Would you like to upload it now?", true) {
+		fileUtils := utils.GetFileUtils()
 		content, err := utils.GetFileUtils().ReadFile(env.Local.TFVarsPath)
 		if err != nil {
 			return fmt.Errorf("failed to read local file: %w", err)
+		}
+
+		fileInfo, err := fileUtils.GetFileInfo(env.Local.TFVarsPath)
+		if err != nil {
+			return fmt.Errorf("failed to get file info: %w", err)
 		}
 
 		uploadOpts := &aws.UploadInput{
@@ -319,14 +327,29 @@ func handleLocalOnly(ctx context.Context, utils command.Utils, env *config.Envir
 			Content:     content,
 			Description: "Initial upload during environment setup",
 			Metadata: map[string]string{
+				"Hash":        fileInfo.Hash,
 				"Environment": env.Name,
 				"UploadedBy":  os.Getenv("USER"),
 			},
 		}
 
-		_, err = utils.GetAWSClient().UploadFile(ctx, uploadOpts)
+		uploadOutput, err := utils.GetAWSClient().UploadFile(ctx, uploadOpts)
 		if err != nil {
 			return fmt.Errorf("failed to upload tfvars: %w", err)
+		}
+
+		versionManager := version.NewManager(utils.GetAWSClient(), fileUtils, env)
+		newVersion := &version.Version{
+			VersionID:   uploadOutput.VersionID,
+			Hash:        fileInfo.Hash,
+			Timestamp:   time.Now(),
+			Description: "Initial upload during environment setup",
+			UploadedBy:  os.Getenv("USER"),
+			Size:        fileInfo.Size,
+		}
+		if err := versionManager.AddVersion(ctx, newVersion); err != nil {
+			fmt.Printf("Warning: Failed to record version information: %v\n", err)
+			fmt.Println("The file was uploaded successfully, but version tracking may be incomplete.")
 		}
 
 		fmt.Println("Successfully uploaded tfvars file.")
