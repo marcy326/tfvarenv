@@ -2,7 +2,7 @@
 
 ## Overview
 
-`tfvarenv` is a powerful CLI tool designed to simplify the management of Terraform environments and `tfvars` files. It provides a comprehensive solution for versioning, tracking, and deploying Terraform configurations across multiple environments.
+`tfvarenv` is a CLI tool that simplifies Terraform environment and `tfvars` file management. It offers S3-backed version control, deployment tracking, and streamlined workflows for multiple environments.
 
 ## Features
 
