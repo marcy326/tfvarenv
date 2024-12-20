@@ -25,7 +25,9 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - "-X 'tfvarenv/cmd.version={{.Version}}'"
+      - "-X 'tfvarenv/cmd.ver={{.Version}}'"
+      - "-X 'tfvarenv/cmd.commit={{.Commit}}'"
+      - "-X 'tfvarenv/cmd.buildDate={{.Date}}'"
 
 archives:
   - name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
